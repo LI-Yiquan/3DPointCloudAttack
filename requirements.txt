@@ -1,0 +1,12 @@
+numpy~=1.19.2
+torch~=1.8.1
+matplotlib~=3.3.4
+scipy~=1.5.4
+pandas~=1.1.5
+tqdm~=4.59.0
+torchvision~=0.9.1
+Pillow~=8.4.0
+open3d~=0.15.2
+pytorch3d~=0.3.0
+plyfile~=0.7.4
+setuptools~=59.6.0
