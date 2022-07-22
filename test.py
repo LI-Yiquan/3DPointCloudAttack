@@ -60,7 +60,7 @@ parser.add_argument(
 parser.add_argument(
     '--emb_dims', type=int, default=1024, metavar='N', help='parameters in DGCNN: Dimension of embeddings')
 parser.add_argument(
-    '--model', type=str, default='DGCNN', help='model type: PointNet or PointNet++Ssg or PointNet++Msg or '
+    '--model', type=str, default='PointNet', help='model type: PointNet or PointNet++Ssg or PointNet++Msg or '
                                                        'DGCNN or CurveNet')
 parser.add_argument(
     '--dataset', type=str, default='Bosphorus', help="dataset: Bosphorus | Eurecom")

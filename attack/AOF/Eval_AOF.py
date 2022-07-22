@@ -379,6 +379,8 @@ if __name__ == "__main__":
     #                          shuffle=False, num_workers=4,
     #                          pin_memory=True, drop_last=False)
 
+
+
     clip_func = ClipPointsLinf(budget=args.budget)
     adv_func = UntargetedLogitsAdvLoss(kappa=30.)
     dist_func = ChamferDist()

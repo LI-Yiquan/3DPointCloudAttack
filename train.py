@@ -165,6 +165,9 @@ for epoch in range(opt.nepoch):
         loss.backward()
         optimizer.step()
         pred_choice = pred.data.max(1)[1]
+        if 105 in target:
+            print("target:",target)
+            print("pred:",pred_choice)
         correct = pred_choice.eq(target.data).cpu().sum()
         count_right = count_right + correct.item()
         count = count + len(target)
@@ -190,5 +193,5 @@ for epoch in range(opt.nepoch):
         if not os.path.isdir(os.path.join(root, '%s/%s' % (opt.outf, opt.dataset))):
             os.makedirs(os.path.join(root, '%s/%s' % (opt.outf, opt.dataset)))
         print("best test acc: {:.4} saved!".format(best))
-        torch.save(classifier.state_dict(), '%s/%s/%s_model_on_%s.pth' % (opt.outf, opt.dataset, opt.model,
-                                                                          opt.dataset))
+        #torch.save(classifier.state_dict(), '%s/%s/%s_model_on_%s.pth' % (opt.outf, opt.dataset, opt.model,
+        #                                                                  opt.dataset))

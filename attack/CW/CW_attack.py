@@ -1,3 +1,9 @@
+"""
+Based on CVPR'19: Generating 3D Adversarial Point Clouds.
+
+https://github.com/code-roamer/AOF/blob/master/baselines/attack/CW/PerturbT.py
+"""
+
 import pdb
 import time
 import random
@@ -6,7 +12,6 @@ import torch
 import torch.optim as optim
 import numpy as np
 
-random.seed(7122)
 
 
 def rand_row(array):
@@ -19,8 +24,8 @@ class CW:
     """Class for CW attack.
     """
 
-    def __init__(self, model, adv_func, dist_func, attack_lr=1e-2,
-                 init_weight=10., max_weight=80., binary_step=10, num_iter=500):
+    def __init__(self, model, trans_model, adv_func, clip_func, dist_func, attack_lr=1e-2,
+                 init_weight=10., max_weight=80., binary_step=10, num_iter=500, attack_method="untarget"):
         """CW attack by perturbing points.
         Args:
             model (torch.nn.Module): victim model
@@ -35,7 +40,8 @@ class CW:
 
         self.model = model.cuda()
         self.model.eval()
-
+        self.trans_model = trans_model.cuda()
+        self.trans_model.eval()
         self.adv_func = adv_func
         self.dist_func = dist_func
         self.attack_lr = attack_lr
@@ -43,6 +49,9 @@ class CW:
         self.max_weight = max_weight
         self.binary_step = binary_step
         self.num_iter = num_iter
+        self.clip_func = clip_func
+        self.attack_method = attack_method
+        self.shuffle_fail = 0
 
     def attack(self, data, target):
         """Attack on given data to target.
@@ -54,7 +63,7 @@ class CW:
         data = data.float().cuda().detach()
         data = data.transpose(1, 2).contiguous()
         ori_data = data.clone().detach()
-        # ori_data.requires_grad = False
+
         target = target.long().cuda().detach()
         label_val = target.detach().cpu().numpy()  # [B]
 
@@ -70,21 +79,19 @@ class CW:
 
         adv_data = ori_data.clone().detach()
         logits, _, _ = self.model(adv_data)  # [B, num_classes]
-        # if isinstance(logits, tuple):  # PointNet
-        #    logits = logits[0]
         pred = torch.argmax(logits, dim=1)
-        pred2 = logits.topk(15, dim=1, largest=True, sorted=True)[1][0][7]
-        # print(logits.topk(15, dim=1, largest=True, sorted=True)[1][0])
-        target = torch.from_numpy(np.array(pred2.cpu())).cuda().unsqueeze(0)
-        print('ori classify as: {}'.format(pred.item()))
-        print('target as: {}'.format(target.item()))
+
+
+        if self.attack_method == "top1 error":
+            pred_max1 = logits.topk(15, dim=1, largest=True, sorted=True)[1][0][1]
+            target = pred_max1
 
         # perform binary search
 
         for binary_step in range(self.binary_step):
             adv_data = ori_data.clone().detach() + torch.randn((B, 3, K)).cuda() * 1e-7
             # init variables with small perturbation
-            # adv_data = ori_data.clone().detach() + torch.randn((B, 3, K)).cuda() * 1e-9
+
             adv_data.requires_grad_()
             bestdist = np.array([1e10] * B)
             bestscore = np.array([-1] * B)
@@ -100,31 +107,21 @@ class CW:
 
             # one step in binary search
             for iteration in range(self.num_iter):
-
                 t1 = time.time()
 
                 # forward passing
                 logits, _, _ = self.model(adv_data)
-                # if isinstance(logits, tuple):  # PointNet
-                #     logits = logits[0]
 
                 t2 = time.time()
                 forward_time += t2 - t1
 
                 # print
                 pred = torch.argmax(logits, dim=1)  # [B]
-                # print(logits.topk(15, dim=1, largest=True, sorted=True)[1][0])
-                if pred == target:
-                    success_num = 1
-                else:
-                    success_num = 0
 
-                # success_num = (pred != ori_label).sum().item() + success_num
-                # if iteration % (self.num_iter // 5) == 0:
-                # print('Step {}, iteration {}, success {}/{}\n'
-                #      'adv_loss: {:.4f}, dist_loss: {:.4f}'.
-                #      format(binary_step, iteration, success_num, B,
-                #             adv_loss.item(), dist_loss.item()))
+                if self.attack_method == "untarget":
+                    success_num = (pred != target).sum().item()
+                else:
+                    success_num = (pred == target).sum().item()
 
                 # record values!
                 dist_val = torch.sqrt(torch.sum(
@@ -152,25 +149,21 @@ class CW:
                 dist_loss = self.dist_func(adv_data, ori_data,
                                            torch.from_numpy(
                                                current_weight)).mean()
-                loss = 10 * adv_loss + dist_loss
+
+                loss = adv_loss + dist_loss
                 opt.zero_grad()
                 loss.backward()
                 opt.step()
+
+                # clipping and projection!
+                if self.clip_func is not None:
+                    adv_data.data = self.clip_func(adv_data.clone().detach(),
+                                          ori_data)
 
                 t4 = time.time()
                 backward_time += t4 - t3
                 total_time += t4 - t1
 
-                # if iteration % 100 == 0:
-                # print('total time: {:.2f}, for: {:.2f}, '
-                #      'back: {:.2f}, update: {:.2f}'.
-                #      format(total_time, forward_time,
-                #             backward_time, update_time))
-                # total_time = 0.
-                # forward_time = 0.
-                # backward_time = 0.
-                # update_time = 0.
-                # torch.cuda.empty_cache()
 
             # adjust weight factor
             for e, label in enumerate(label_val):
@@ -191,16 +184,30 @@ class CW:
         fail_idx = (lower_bound == 0.)
         o_bestattack[fail_idx] = input_val[fail_idx]
 
-        # return final results
-        # success_num = (lower_bound > 0.).sum()
 
-        # logits, _, _ = self.model(o_bestattack)
+        # Test shuffle attack
         attack_result = o_bestattack.transpose((0, 2, 1))
         attack_result = rand_row(attack_result)
         attack_result = torch.from_numpy(attack_result.transpose((0, 2, 1)))
         attack_result = attack_result.float().cuda()
+        shuffle_logists, _, _ = self.model(attack_result)
+        print('shuffle result: ',torch.argmax(shuffle_logists, dim=1))
+        if torch.argmax(shuffle_logists, dim=1) != target:
+            self.shuffle_fail+=1
+            print("shuffle fail: ", self.shuffle_fail)
 
-        logits_result, _, _ = self.model(attack_result)
-        print('result after shuffle: ',torch.argmax(logits_result, dim=1))
+        # Test transfer attack
+        transfer_result = o_bestattack
+        transfer_result = torch.from_numpy(transfer_result)
+        transfer_result = transfer_result.float().cuda()
+        transfer_logists, _, _ = self.trans_model(transfer_result)
+        print('transfer result: ', torch.argmax(transfer_logists, dim=1).item())
+
+        # return final results
+        # success_num = (lower_bound > 0.).sum()
         print('Successfully attack {}/{}'.format(success_num, B))
-        return o_bestdist, o_bestattack.transpose((0, 2, 1)), success_num
+        if torch.argmax(transfer_logists, dim=1).item() != pred.item() and success_num==1:
+            trans_success=1
+        else:
+            trans_success=0
+        return o_bestdist, o_bestattack.transpose((0, 2, 1)), success_num, trans_success

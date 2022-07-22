@@ -588,7 +588,7 @@ class PointCloudAttack(object):
                     best_loss = loss.item()
                     new_points = new_points + pert
                     adv_target = logits.max(1)[1]
-                    # print("adv target: ",adv_target)
+                    # print("adv target: ",adv_target)-
                     break
             i += 1
         # print(query_costs)
