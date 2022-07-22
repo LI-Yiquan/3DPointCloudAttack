@@ -80,11 +80,12 @@ class CW:
         adv_data = ori_data.clone().detach()
         logits, _, _ = self.model(adv_data)  # [B, num_classes]
         pred = torch.argmax(logits, dim=1)
+        print("ori label:",pred.item())
 
-
-        if self.attack_method == "top1 error":
-            pred_max1 = logits.topk(15, dim=1, largest=True, sorted=True)[1][0][1]
-            target = pred_max1
+        if self.attack_method == 'top1_error':
+            pred_max1 = logits.topk(35, dim=1, largest=True, sorted=True)[1][0][30]
+            target =label_val= pred_max1.unsqueeze(0)
+            print(target.item())
 
         # perform binary search
 
@@ -133,13 +134,23 @@ class CW:
                 # update
                 for e, (dist, pred, label, ii) in \
                         enumerate(zip(dist_val, pred_val, label_val, input_val)):
-                    if dist < bestdist[e] and pred == label:
-                        bestdist[e] = dist
-                        bestscore[e] = pred
-                    if dist < o_bestdist[e] and pred == label:
-                        o_bestdist[e] = dist
-                        o_bestscore[e] = pred
-                        o_bestattack[e] = ii
+                    if self.attack_method == 'untarget':
+                        if dist < bestdist[e] and pred != label:
+                            bestdist[e] = dist
+                            bestscore[e] = pred
+                        if dist < o_bestdist[e] and pred != label:
+                            o_bestdist[e] = dist
+                            o_bestscore[e] = pred
+                            o_bestattack[e] = ii
+                    else:
+                        if dist < bestdist[e] and pred == label:
+                            bestdist[e] = dist
+                            bestscore[e] = pred
+                        if dist < o_bestdist[e] and pred == label:
+                            o_bestdist[e] = dist
+                            o_bestscore[e] = pred
+                            o_bestattack[e] = ii
+
 
                 t3 = time.time()
                 update_time += t3 - t2
@@ -167,14 +178,25 @@ class CW:
 
             # adjust weight factor
             for e, label in enumerate(label_val):
-                if bestscore[e] == label and bestscore[e] != -1 and bestdist[e] <= o_bestdist[e]:
-                    # success
-                    lower_bound[e] = max(lower_bound[e], current_weight[e])
-                    current_weight[e] = (lower_bound[e] + upper_bound[e]) / 2.
+                if self.attack_method == 'untarget':
+                    if bestscore[e] != label and bestscore[e] != -1 and bestdist[e] <= o_bestdist[e]:
+                        # success
+                        lower_bound[e] = max(lower_bound[e], current_weight[e])
+                        current_weight[e] = (lower_bound[e] + upper_bound[e]) / 2.
+                    else:
+                        # failure
+                        upper_bound[e] = min(upper_bound[e], current_weight[e])
+                        current_weight[e] = (lower_bound[e] + upper_bound[e]) / 2.
                 else:
-                    # failure
-                    upper_bound[e] = min(upper_bound[e], current_weight[e])
-                    current_weight[e] = (lower_bound[e] + upper_bound[e]) / 2.
+                    if bestscore[e] == label and bestscore[e] != -1 and bestdist[e] <= o_bestdist[e]:
+                        # success
+                        lower_bound[e] = max(lower_bound[e], current_weight[e])
+                        current_weight[e] = (lower_bound[e] + upper_bound[e]) / 2.
+                    else:
+                        # failure
+                        upper_bound[e] = min(upper_bound[e], current_weight[e])
+                        current_weight[e] = (lower_bound[e] + upper_bound[e]) / 2.
+
 
             torch.cuda.empty_cache()
 
@@ -184,29 +206,40 @@ class CW:
         fail_idx = (lower_bound == 0.)
         o_bestattack[fail_idx] = input_val[fail_idx]
 
+        # Test attack
+        attack_result = o_bestattack
+        attack_result = torch.from_numpy(attack_result)
+        attack_result = attack_result.float().cuda()
+        attack_logits, _, _ = self.model(attack_result)
+        print('attack result: ', torch.argmax(attack_logits, dim=1).item())
 
         # Test shuffle attack
         attack_result = o_bestattack.transpose((0, 2, 1))
         attack_result = rand_row(attack_result)
         attack_result = torch.from_numpy(attack_result.transpose((0, 2, 1)))
         attack_result = attack_result.float().cuda()
-        shuffle_logists, _, _ = self.model(attack_result)
-        print('shuffle result: ',torch.argmax(shuffle_logists, dim=1))
-        if torch.argmax(shuffle_logists, dim=1) != target:
-            self.shuffle_fail+=1
-            print("shuffle fail: ", self.shuffle_fail)
+        shuffle_logits, _, _ = self.model(attack_result)
+        print('shuffle result: ',torch.argmax(shuffle_logits, dim=1).item())
+        if self.attack_method == 'untarget':
+            if torch.argmax(shuffle_logits, dim=1) == target:
+                self.shuffle_fail+=1
+                print("shuffle fail: ", self.shuffle_fail)
+        else:
+            if torch.argmax(shuffle_logits, dim=1) != target:
+                self.shuffle_fail += 1
+                print("shuffle fail: ", self.shuffle_fail)
 
         # Test transfer attack
         transfer_result = o_bestattack
         transfer_result = torch.from_numpy(transfer_result)
         transfer_result = transfer_result.float().cuda()
-        transfer_logists, _, _ = self.trans_model(transfer_result)
-        print('transfer result: ', torch.argmax(transfer_logists, dim=1).item())
+        transfer_logits, _, _ = self.trans_model(transfer_result)
+        print('transfer result: ', torch.argmax(transfer_logits, dim=1).item())
 
         # return final results
         # success_num = (lower_bound > 0.).sum()
         print('Successfully attack {}/{}'.format(success_num, B))
-        if torch.argmax(transfer_logists, dim=1).item() != pred.item() and success_num==1:
+        if torch.argmax(transfer_logits, dim=1).item() != pred.item() and success_num==1:
             trans_success=1
         else:
             trans_success=0

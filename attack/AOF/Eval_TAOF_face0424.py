@@ -21,7 +21,7 @@ from dataset.bosphorus_dataset import Bosphorus_Dataset
 
 from attack.CW.CW_utils.basic_util import str2bool, set_seed
 from attack.AOF.TAOF import CWTAOF
-from attack.CW.CW_utils.adv_utils import CrossEntropyAdvLoss, LogitsAdvLoss
+from attack.CW.CW_utils.adv_utils import CrossEntropyAdvLoss, LogitsAdvLoss, UntargetedLogitsAdvLoss
 from attack.CW.CW_utils.dist_utils import L2Dist, ClipPointsLinf, ChamferDist
 from model.curvenet import CurveNet
 from model.pointnet import PointNetCls, feature_transform_regularizer
@@ -49,7 +49,8 @@ def attack():
     point_cloud_data = np.loadtxt(data_root, delimiter=',')
     point_cloud_data = rand_row(point_cloud_data, 4000)
     point_cloud_data = point_cloud_data[:, 0:3]
-    point_cloud_data = point_cloud_data - np.expand_dims(np.mean(point_cloud_data, axis=0), 0)  # center
+    center = np.expand_dims(np.mean(point_cloud_data, axis=0), 0)
+    point_cloud_data = point_cloud_data - center  # center
     dist = np.max(np.sqrt(np.sum(point_cloud_data ** 2, axis=1)), 0)
     point_cloud_data = point_cloud_data / dist  # scale
     pc = torch.from_numpy(point_cloud_data.astype(np.float))
@@ -69,11 +70,13 @@ def attack():
         # attack!
         _, best_pc, success_num = attacker.attack(pc, target_label,label)
 
-        #data_root = os.path.expanduser("~//yq_pointnet//attack/CW/AdvData/PointNet")
-        #adv_f = '{}-{}-{}.txt'.format(i, int(label.detach().cpu().numpy()), int(target_label.detach().cpu().numpy()))
-        #adv_fname = os.path.join(data_root, adv_f)
-        #if success_num == 1:
-        #    np.savetxt(adv_fname, best_pc.squeeze(0), fmt='%.04f')
+        data_root = os.path.expanduser("~//yq_pointnet//attack/AOF/AdvData/{}".format(args.model))
+        adv_f = '{}.txt'.format(int(target_label.detach().cpu().numpy()))
+        adv_fname = os.path.join(data_root, adv_f)
+        best_pc = best_pc.squeeze(0)
+        best_pc = best_pc*dist + center
+        if success_num == 1:
+            np.savetxt(adv_fname, best_pc, fmt='%.04f')
 
 
         # results
@@ -179,6 +182,7 @@ if __name__ == "__main__":
         adv_func = LogitsAdvLoss(kappa=args.kappa)
     else:
         adv_func = CrossEntropyAdvLoss()
+
     dist_func = ChamferDist()
     clip_func = ClipPointsLinf(budget=args.budget)
     # hyper-parameters from their official tensorflow code

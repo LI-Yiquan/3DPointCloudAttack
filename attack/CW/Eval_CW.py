@@ -1,5 +1,3 @@
-"""Targeted point perturbation attack."""
-
 import os
 import random
 from tqdm import tqdm
@@ -29,23 +27,17 @@ def attack():
     trans_num = 0
     for i, data in tqdm(enumerate(test_loader, 0)):
         pc, label = data
-        target = label
-        target = random.randint(0, 104+1)
-        alist = []
-        for j in range(len(label)):
-            target = random.randint(0, 104+1)
-            alist.append(target)
-        target = torch.tensor(alist)
+        target = torch.tensor([label])
         pc, target_label = pc.to(device='cuda', dtype=torch.float), target.cuda().float()
 
         # attack!
         _, best_pc, success_num,trans_success = attacker.attack(pc, target_label)
 
         data_root = os.path.expanduser("~//yq_pointnet//attack/CW/AdvData/PointNet")
-        adv_f = '{}-{}-{}.txt'.format(i, int(label.detach().cpu().numpy()), int(target_label.detach().cpu().numpy()))
-        adv_fname = os.path.join(data_root, adv_f)
-        if success_num == 1:
-            np.savetxt(adv_fname, best_pc.squeeze(0), fmt='%.04f')
+        #adv_f = '{}-{}-{}.txt'.format(i, int(label.detach().cpu().numpy()), int(target_label.detach().cpu().numpy()))
+        #adv_fname = os.path.join(data_root, adv_f)
+        #if success_num == 1:
+        #    np.savetxt(adv_fname, best_pc.squeeze(0), fmt='%.04f')
         # results
         num += success_num
         trans_num += trans_success
@@ -63,10 +55,10 @@ def attack():
 if __name__ == "__main__":
     # Training settings
     parser = argparse.ArgumentParser(description='Point Cloud Recognition')
-    parser.add_argument('--attack_method', type=str, default='untarget', help="untarget | max error")
-    parser.add_argument('--model', type=str, default='PointNet++Msg', metavar='N',
+    parser.add_argument('--attack_method', type=str, default='top1_error', help="untarget | top1_error")
+    parser.add_argument('--model', type=str, default='DGCNN', metavar='N',
                         help="Model to use, ['PointNet', 'PointNet++Msg','DGCNN', 'CurveNet']")
-    parser.add_argument('--trans_model', type=str, default='DGCNN', metavar='N',
+    parser.add_argument('--trans_model', type=str, default='PointNet', metavar='N',
                         help="Model to use, ['PointNet', 'PointNet++Msg','DGCNN', 'CurveNet']")
     parser.add_argument('--dataset', type=str, default='Bosphorus',
                         help='dataset : Bosphorus | Eurecom')
@@ -98,8 +90,8 @@ if __name__ == "__main__":
                         help='number of class')
     parser.add_argument('--budget', default=0.18,type=float,
                         help='budget parameter in the clip function, use 0.18 | 0.45')
-    parser.add_argument('--feature_transform', action='store_true',
-                       help="use feature transform")
+    # parser.add_argument('--feature_transform', action='store_true',
+    #                    help="use feature transform")
     args = parser.parse_args()
 
 
@@ -107,7 +99,7 @@ if __name__ == "__main__":
         model = PointNetCls(k=args.num_of_class, feature_transform=False)
     elif args.model == 'PointNet++Msg':
         model = PointNet_Msg(args.num_of_class, normal_channel=False)
-    elif args.model == 'PointNet2_SSG':
+    elif args.model == 'PointNet++Ssg':
         model = PointNet_Ssg(args.num_of_class)
     elif args.model == 'DGCNN':
         model = DGCNN(args, output_channels=args.num_of_class).to(device)
@@ -126,7 +118,7 @@ if __name__ == "__main__":
         trans_model = PointNetCls(k=args.num_of_class, feature_transform=False)
     elif args.trans_model == 'PointNet++Msg':
         trans_model = PointNet_Msg(args.num_of_class, normal_channel=False)
-    elif args.trans_model == 'PointNet2_SSG':
+    elif args.trans_model == 'PointNet++Ssg':
         trans_model = PointNet_Ssg(args.num_of_class)
     elif args.trans_model == 'DGCNN':
         trans_model = DGCNN(args, output_channels=args.num_of_class).to(device)
@@ -157,6 +149,7 @@ if __name__ == "__main__":
 
     if args.attack_method == 'untarget':
         adv_func = UntargetedLogitsAdvLoss(kappa=args.kappa)
+
 
     dist_func = L2Dist()
     clip_func = ClipPointsLinf(budget=args.budget)
