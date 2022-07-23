@@ -163,6 +163,7 @@ class CW:
                                                current_weight)).mean()
 
                 loss = adv_loss + dist_loss
+
                 opt.zero_grad()
                 loss.backward()
                 opt.step()
@@ -227,6 +228,7 @@ class CW:
         attack_result = rand_row(attack_result)
         attack_result = torch.from_numpy(attack_result.transpose((0, 2, 1)))
         attack_result = attack_result.float().cuda()
+
         shuffle_logits, _, _ = self.model(attack_result)
         print('shuffle result: ',torch.argmax(shuffle_logits, dim=1).item())
         if self.attack_method == 'untarget':
@@ -237,6 +239,16 @@ class CW:
             if torch.argmax(shuffle_logits, dim=1) != target:
                 self.shuffle_fail += 1
                 print("shuffle fail: ", self.shuffle_fail)
+
+        randperm_result = o_bestattack.transpose((0, 2, 1))
+        randperm_result = torch.from_numpy(randperm_result)
+        randperm_result = randperm_result[0,torch.randperm(randperm_result.size(1))].unsqueeze(0)
+        randperm_result = randperm_result.transpose(2,1)
+        randperm_result = randperm_result.float().cuda()
+
+        randperm_logits, _, _ = self.model(randperm_result)
+        print('randperm result: ', torch.argmax(randperm_logits, dim=1).item())
+
 
         # Test transfer attack
         transfer_result = o_bestattack

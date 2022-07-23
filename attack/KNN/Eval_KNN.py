@@ -9,7 +9,7 @@ from dataset.bosphorus_dataset import Bosphorus_Dataset
 from attack.CW.CW_utils.basic_util import str2bool, set_seed
 from attack.KNN.KNN_attack import CWKNN
 from attack.CW.CW_utils.adv_utils import CrossEntropyAdvLoss, LogitsAdvLoss, UntargetedLogitsAdvLoss
-from attack.CW.CW_utils.dist_utils import L2Dist, ClipPointsLinf
+from attack.CW.CW_utils.dist_utils import L2Dist, ClipPointsLinf, ChamferkNNDist
 from model.curvenet import CurveNet
 from model.pointnet import PointNetCls, feature_transform_regularizer
 from model.pointnet2_MSG import PointNet_Msg
@@ -56,7 +56,7 @@ if __name__ == "__main__":
     # Training settings
     parser = argparse.ArgumentParser(description='Point Cloud Recognition')
     parser.add_argument('--attack_method', type=str, default='untarget', help="untarget | top1_error")
-    parser.add_argument('--model', type=str, default='PointNet', metavar='N',
+    parser.add_argument('--model', type=str, default='PointNet++Msg', metavar='N',
                         help="Model to use, ['PointNet', 'PointNet++Msg','DGCNN', 'CurveNet']")
     parser.add_argument('--trans_model', type=str, default='PointNet++Msg', metavar='N',
                         help="Model to use, ['PointNet', 'PointNet++Msg','DGCNN', 'CurveNet']")
@@ -76,7 +76,7 @@ if __name__ == "__main__":
     parser.add_argument('--adv_func', type=str, default='logits',
                         choices=['logits', 'cross_entropy'],
                         help='Adversarial loss function to use')
-    parser.add_argument('--kappa', type=float, default=0.,
+    parser.add_argument('--kappa', type=float, default=15,
                         help='min margin in logits adv loss')
     parser.add_argument('--attack_lr', type=float, default=1e-2,
                         help='lr in CW optimization')
@@ -151,7 +151,9 @@ if __name__ == "__main__":
         adv_func = UntargetedLogitsAdvLoss(kappa=args.kappa)
 
 
-    dist_func = L2Dist()
+    dist_func = ChamferkNNDist(chamfer_method='adv2ori',
+                               knn_k=5, knn_alpha=1.05,
+                               chamfer_weight=5., knn_weight=3.)
     clip_func = ClipPointsLinf(budget=args.budget)
 
 

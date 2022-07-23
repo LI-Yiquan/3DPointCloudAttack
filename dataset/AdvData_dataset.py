@@ -19,7 +19,7 @@ numpy.set_printoptions(precision=4)
 
 
 def read_PC(idx, path):
-    A = zeros((1341, 3), dtype=float)
+    A = zeros((4000, 3), dtype=float)
     files = os.listdir(path)
     ori = tar = idx
     for file in files:

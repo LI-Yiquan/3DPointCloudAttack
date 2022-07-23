@@ -83,7 +83,6 @@ class CWKNN:
 
             # print
             pred = torch.argmax(logits, dim=1)  # [B]
-            print(pred)
             if self.attack_method == 'untarget':
                 success_num = (pred != target).sum().item()
             else:
@@ -98,6 +97,7 @@ class CWKNN:
                 ori_data.transpose(1, 2).contiguous()).mean() * K
 
             loss = adv_loss + dist_loss
+
             opt.zero_grad()
             loss.backward()
             opt.step()

@@ -56,9 +56,9 @@ if __name__ == "__main__":
     # Training settings
     parser = argparse.ArgumentParser(description='Point Cloud Recognition')
     parser.add_argument('--attack_method', type=str, default='untarget', help="untarget | top1_error")
-    parser.add_argument('--model', type=str, default='PointNet', metavar='N',
+    parser.add_argument('--model', type=str, default='PointNet++Msg', metavar='N',
                         help="Model to use, ['PointNet', 'PointNet++Msg','DGCNN', 'CurveNet']")
-    parser.add_argument('--trans_model', type=str, default='PointNet++Msg', metavar='N',
+    parser.add_argument('--trans_model', type=str, default='PointNet', metavar='N',
                         help="Model to use, ['PointNet', 'PointNet++Msg','DGCNN', 'CurveNet']")
     parser.add_argument('--dataset', type=str, default='Bosphorus',
                         help='dataset : Bosphorus | Eurecom')
