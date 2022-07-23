@@ -7,7 +7,7 @@ import torch
 from torch.utils.data import DataLoader
 from dataset.bosphorus_dataset import Bosphorus_Dataset
 from attack.CW.CW_utils.basic_util import str2bool, set_seed
-from attack.CW.CW_attack import CW
+from attack.KNN.KNN_attack import CWKNN
 from attack.CW.CW_utils.adv_utils import CrossEntropyAdvLoss, LogitsAdvLoss, UntargetedLogitsAdvLoss
 from attack.CW.CW_utils.dist_utils import L2Dist, ClipPointsLinf
 from model.curvenet import CurveNet
@@ -31,9 +31,9 @@ def attack():
         pc, target_label = pc.to(device='cuda', dtype=torch.float), target.cuda().float()
 
         # attack!
-        _, best_pc, success_num = attacker.attack(pc, target_label)
+        best_pc, success_num = attacker.attack(pc, target_label)
 
-        data_root = os.path.expanduser("~//yq_pointnet//attack/CW/AdvData/PointNet")
+        #data_root = os.path.expanduser("~//yq_pointnet//attack/CW/AdvData/PointNet")
         #adv_f = '{}-{}-{}.txt'.format(i, int(label.detach().cpu().numpy()), int(target_label.detach().cpu().numpy()))
         #adv_fname = os.path.join(data_root, adv_f)
         #if success_num == 1:
@@ -156,10 +156,8 @@ if __name__ == "__main__":
 
 
     # hyper-parameters from their official tensorflow code
-    attacker = CW(model=model, trans_model=trans_model,adv_func=adv_func, dist_func=dist_func,
+    attacker = CWKNN(model=model, trans_model=trans_model,adv_func=adv_func, dist_func=dist_func,
                   attack_lr=args.attack_lr,
-                  init_weight=10., max_weight=80.,
-                  binary_step=args.binary_step,
                   num_iter=args.num_iter,clip_func=clip_func,attack_method=args.attack_method)
 
     # run attack

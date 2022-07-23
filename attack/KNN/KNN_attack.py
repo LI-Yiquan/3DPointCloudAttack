@@ -10,17 +10,20 @@ class CWKNN:
     """Class for CW attack.
     """
 
-    def __init__(self, model, adv_func, dist_func, clip_func,
-                 attack_lr=1e-3, num_iter=2500):
+    def __init__(self, model, trans_model,adv_func, dist_func, clip_func,
+                 attack_lr=1e-3, num_iter=2500,attack_method='untarget'):
 
         self.model = model.cuda()
         self.model.eval()
+        self.trans_model = trans_model.cuda()
+        self.trans_model.eval()
 
         self.adv_func = adv_func
         self.dist_func = dist_func
         self.clip_func = clip_func
         self.attack_lr = attack_lr
         self.num_iter = num_iter
+        self.attack_method = attack_method
 
     def attack(self, data, target):
         """Attack on given data to target.
@@ -40,6 +43,15 @@ class CWKNN:
         else:
             normal = ori_data[:, 3:, :]
             ori_data = ori_data[:, :3, :]
+
+        logits, _, _ = self.model(ori_data)  # [B, num_classes]
+        pred = torch.argmax(logits, dim=1)
+        print("ori label:", pred.item())
+        if self.attack_method == 'top1_error':
+            pred_max1 = logits.topk(5, dim=1, largest=True, sorted=True)[1][0][1]
+            target = pred_max1.unsqueeze(0)
+            print(target.item())
+
         target = target.long().cuda().detach()
 
         # init variables with small perturbation
@@ -71,13 +83,11 @@ class CWKNN:
 
             # print
             pred = torch.argmax(logits, dim=1)  # [B]
-            success_num = (pred == target).sum().item()
-            if iteration % (self.num_iter // 5) == 0:
-                print('Iteration {}/{}, success {}/{}\n'
-                      'adv_loss: {:.4f}, dist_loss: {:.4f}'.
-                      format(iteration, self.num_iter, success_num, B,
-                             adv_loss.item(), dist_loss.item()))
-
+            print(pred)
+            if self.attack_method == 'untarget':
+                success_num = (pred != target).sum().item()
+            else:
+                success_num = (pred == target).sum().item()
             # compute loss and backward
             adv_loss = self.adv_func(logits, target).mean()
 
@@ -96,23 +106,14 @@ class CWKNN:
             backward_time += t3 - t2
 
             # clipping and projection!
-            adv_data.data = self.clip_func(adv_data.clone().detach(),
-                                           ori_data, normal)
+            # adv_data.data = self.clip_func(adv_data.clone().detach(),
+            #                                ori_data, normal)
+
 
             t4 = time.time()
             clip_time = t4 - t3
             total_time += t4 - t1
 
-            if iteration % 100 == 0:
-                print('total time: {:.2f}, for: {:.2f}, '
-                      'back: {:.2f}, clip: {:.2f}'.
-                      format(total_time, forward_time,
-                             backward_time, clip_time))
-                total_time = 0.
-                forward_time = 0.
-                backward_time = 0.
-                clip_time = 0.
-                torch.cuda.empty_cache()
 
         # end of CW attack
         with torch.no_grad():
@@ -120,8 +121,12 @@ class CWKNN:
             if isinstance(logits, tuple):  # PointNet
                 logits = logits[0]
             pred = torch.argmax(logits, dim=-1)  # [B]
-            success_num = (pred == target).\
-                sum().detach().cpu().item()
+            if self.attack_method == 'untarget':
+                success_num = (pred != target). \
+                    sum().detach().cpu().item()
+            else:
+                success_num = (pred == target).\
+                    sum().detach().cpu().item()
 
         # return final results
         print('Successfully attack {}/{}'.format(success_num, B))

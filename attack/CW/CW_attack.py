@@ -13,7 +13,6 @@ import torch.optim as optim
 import numpy as np
 
 
-
 def rand_row(array):
     row_total = array.shape[1]
     row_sequence = np.arange(row_total)
@@ -52,6 +51,8 @@ class CW:
         self.clip_func = clip_func
         self.attack_method = attack_method
         self.shuffle_fail = 0
+        self.trans_fail = 0
+        self.attack_fail = 0
 
     def attack(self, data, target):
         """Attack on given data to target.
@@ -83,7 +84,7 @@ class CW:
         print("ori label:",pred.item())
 
         if self.attack_method == 'top1_error':
-            pred_max1 = logits.topk(35, dim=1, largest=True, sorted=True)[1][0][30]
+            pred_max1 = logits.topk(5, dim=1, largest=True, sorted=True)[1][0][1]
             target =label_val= pred_max1.unsqueeze(0)
             print(target.item())
 
@@ -212,6 +213,14 @@ class CW:
         attack_result = attack_result.float().cuda()
         attack_logits, _, _ = self.model(attack_result)
         print('attack result: ', torch.argmax(attack_logits, dim=1).item())
+        if self.attack_method == 'untarget':
+            if torch.argmax(attack_logits, dim=1) == target:
+                self.attack_fail += 1
+                print("attack fail: ", self.attack_fail)
+        else:
+            if torch.argmax(attack_logits, dim=1) != target:
+                self.attack_fail += 1
+                print("attack fail: ", self.attack_fail)
 
         # Test shuffle attack
         attack_result = o_bestattack.transpose((0, 2, 1))
@@ -235,12 +244,14 @@ class CW:
         transfer_result = transfer_result.float().cuda()
         transfer_logits, _, _ = self.trans_model(transfer_result)
         print('transfer result: ', torch.argmax(transfer_logits, dim=1).item())
-
-        # return final results
-        # success_num = (lower_bound > 0.).sum()
-        print('Successfully attack {}/{}'.format(success_num, B))
-        if torch.argmax(transfer_logits, dim=1).item() != pred.item() and success_num==1:
-            trans_success=1
+        if self.attack_method == 'untarget':
+            if torch.argmax(transfer_logits, dim=1) == target:
+                self.trans_fail+=1
+                print("trans fail: ", self.trans_fail)
         else:
-            trans_success=0
-        return o_bestdist, o_bestattack.transpose((0, 2, 1)), success_num, trans_success
+            if torch.argmax(transfer_logits, dim=1) != target:
+                self.trans_fail += 1
+                print("trans fail: ", self.trans_fail)
+
+
+        return o_bestdist, o_bestattack.transpose((0, 2, 1)), success_num

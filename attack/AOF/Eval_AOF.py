@@ -319,9 +319,9 @@ if __name__ == "__main__":
     # build victim model
     if args.model == 'PointNet':
         model = PointNetCls(k=args.num_of_class, feature_transform=False)
-    elif args.model == 'PointNet2_MSG':
+    elif args.model == 'PointNet++Msg':
         model = PointNet_Msg(args.num_of_class, normal_channel=False)
-    elif args.model == 'PointNet2_SSG':
+    elif args.model == 'PointNet++Ssg':
         model = PointNet_Ssg(args.num_of_class)
     elif args.model == 'DGCNN':
         model = DGCNN(args, output_channels=args.num_of_class).to(device)
@@ -339,9 +339,9 @@ if __name__ == "__main__":
     # build transfer model
     if args.trans_model == 'PointNet':
         trans_model = PointNetCls(k=args.num_of_class, feature_transform=False)
-    elif args.trans_model == 'PointNet2_MSG':
+    elif args.trans_model == 'PointNet++Msg':
         trans_model = PointNet_Msg(args.num_of_class, normal_channel=False)
-    elif args.trans_model == 'PointNet2_SSG':
+    elif args.trans_model == 'PointNet++Ssg':
         trans_model = PointNet_Ssg(args.num_of_class)
     elif args.trans_model == 'DGCNN':
         trans_model = DGCNN(args, output_channels=args.num_of_class).to(device)

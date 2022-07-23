@@ -1,5 +1,3 @@
-"""Targeted point perturbation attack."""
-
 import os
 import random
 
@@ -15,9 +13,6 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel
 
 from dataset.bosphorus_dataset import Bosphorus_Dataset
-# from config import BEST_WEIGHTS
-# from config import MAX_PERTURB_BATCH as BATCH_SIZE
-# from dataset import ModelNet40Attack
 
 from attack.CW.CW_utils.basic_util import str2bool, set_seed
 from attack.AOF.TAOF import CWTAOF
@@ -75,8 +70,8 @@ def attack():
         adv_fname = os.path.join(data_root, adv_f)
         best_pc = best_pc.squeeze(0)
         best_pc = best_pc*dist + center
-        if success_num == 1:
-            np.savetxt(adv_fname, best_pc, fmt='%.04f')
+        #if success_num == 1:
+            #np.savetxt(adv_fname, best_pc, fmt='%.04f')
 
 
         # results
@@ -95,9 +90,9 @@ def attack():
 if __name__ == "__main__":
     # Training settings
     parser = argparse.ArgumentParser(description='Point Cloud Recognition')
-    parser.add_argument('--model', type=str, default='PointNet', metavar='N',
+    parser.add_argument('--model', type=str, default='DGCNN', metavar='N',
                         help="Model to use, ['PointNet', 'PointNet++Msg','DGCNN', 'CurveNet']")
-    parser.add_argument('--trans_model', type=str, default='PointNet', metavar='N',
+    parser.add_argument('--trans_model', type=str, default='DGCNN', metavar='N',
                         help="Model to use, ['PointNet', 'PointNet++Msg','DGCNN', 'CurveNet']")
     parser.add_argument('--dataset', type=str, default='Bosphorus',
                         help='dataset : Bosphorus | Eurecom')
@@ -136,7 +131,7 @@ if __name__ == "__main__":
 
     if args.model == 'PointNet':
         model = PointNetCls(k=args.num_of_class, feature_transform=False)
-    elif args.model == 'PointNet2_MSG':
+    elif args.model == 'PointNet++Msg':
         model = PointNet_Msg(args.num_of_class, normal_channel=False)
     elif args.model == 'PointNet2_SSG':
         model = PointNet_Ssg(args.num_of_class)
@@ -152,7 +147,7 @@ if __name__ == "__main__":
             '~//yq_pointnet//cls//{}//{}_model_on_{}.pth'.format(args.dataset, args.model, args.dataset))))
     if args.trans_model == 'PointNet':
         trans_model = PointNetCls(k=args.num_of_class, feature_transform=False)
-    elif args.trans_model == 'PointNet2_MSG':
+    elif args.trans_model == 'PointNet++Msg':
         trans_model = PointNet_Msg(args.num_of_class, normal_channel=False)
     elif args.trans_model == 'PointNet2_SSG':
         trans_model = PointNet_Ssg(args.num_of_class)
@@ -186,7 +181,7 @@ if __name__ == "__main__":
     dist_func = ChamferDist()
     clip_func = ClipPointsLinf(budget=args.budget)
     # hyper-parameters from their official tensorflow code
-    attacker = CWTAOF(model=model,adv_func=adv_func, dist_func=ChamferDist(),
+    attacker = CWTAOF(model=model,adv_func=adv_func, dist_func=dist_func,
                   attack_lr=args.attack_lr,
                   binary_step=args.binary_step,
                   num_iter=args.num_iter,clip_func=clip_func)
