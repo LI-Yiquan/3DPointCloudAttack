@@ -15,7 +15,7 @@ from torch.nn.parallel import DistributedDataParallel
 from dataset.bosphorus_dataset import Bosphorus_Dataset
 
 from attack.CW.CW_utils.basic_util import str2bool, set_seed
-from attack.AOF.TAOF import CWTAOF
+from attack.AOF.TAOF_attack import CWTAOF
 from attack.CW.CW_utils.adv_utils import CrossEntropyAdvLoss, LogitsAdvLoss, UntargetedLogitsAdvLoss
 from attack.CW.CW_utils.dist_utils import L2Dist, ClipPointsLinf, ChamferDist
 from model.curvenet import CurveNet

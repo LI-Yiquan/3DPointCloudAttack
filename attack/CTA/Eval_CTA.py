@@ -140,7 +140,7 @@ parser.add_argument('--outf', type=str, default='cls', help='output folder')
 parser.add_argument('--dropout', type=float, default=0.5, help='parameters in DGCNN: dropout rate')
 parser.add_argument('--k', type=int, default=20, help='parameters in DGCNN: k')
 parser.add_argument('--emb_dims', type=int, default=1024, metavar='N', help='parameters in DGCNN: Dimension of embeddings')
-parser.add_argument('--load_model_path', type=str, default='~//yq_pointnet//CW_utils//cls//cls_model_14.pth', help='model path')
+parser.add_argument('--load_model_path', type=str, default='~//yq_pointnet//utils//cls//cls_model_14.pth', help='model path')
 parser.add_argument('--model', type=str, default='PointNet++', help='model type: PointNet or PointNet++ or DGCNN')
 #parser.add_argument('--dataset', type=str, default='../shapenetcore_partanno_segmentation_benchmark_v0', help="dataset path")
 parser.add_argument('--dataset_type', type=str, default='bosphorus', help="dataset type shapenet|modelnet40|bosphorus")
@@ -165,7 +165,7 @@ else:
 classifier = PointNetCls(k=105, feature_transform=True)
 
 
-classifier.load_state_dict(torch.load(os.path.expanduser(os.path.expanduser('~//yq_pointnet//CW_utils//cls//yq_cls_model_150.pth'))))
+classifier.load_state_dict(torch.load(os.path.expanduser(os.path.expanduser('~//yq_pointnet//utils//cls//yq_cls_model_150.pth'))))
 test_dataset_path = os.path.expanduser("~//yq_pointnet//BosphorusDB//eval.csv")
 test_dataset = Bosphorus_Dataset(test_dataset_path)
 

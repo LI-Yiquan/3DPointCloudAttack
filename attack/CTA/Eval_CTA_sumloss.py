@@ -140,7 +140,7 @@ SHAPE_NAMES = [line.rstrip() for line in \
 
 
 classifier = PointNetCls(k=105, feature_transform=True)
-classifier.load_state_dict(torch.load(os.path.expanduser(os.path.expanduser('~//yq_pointnet//CW_utils//cls//yq_cls_model_150.pth'))))
+classifier.load_state_dict(torch.load(os.path.expanduser(os.path.expanduser('~//yq_pointnet//utils//cls//yq_cls_model_150.pth'))))
 test_dataset_path = os.path.expanduser("~//yq_pointnet//BosphorusDB//eval.csv")
 test_dataset = Bosphorus_Dataset(test_dataset_path)
 

@@ -6,10 +6,11 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from dataset.bosphorus_dataset import Bosphorus_Dataset
-from attack.CW.CW_utils.basic_util import str2bool, set_seed
-from attack.CW.CW_attack import CW
-from attack.CW.CW_utils.adv_utils import CrossEntropyAdvLoss, LogitsAdvLoss, UntargetedLogitsAdvLoss
-from attack.CW.CW_utils.dist_utils import L2Dist, ClipPointsLinf
+
+from attack.Gen3DAdv.utils.basic_util import str2bool, set_seed
+from attack.Gen3DAdv.Perturb_attack import CW
+from attack.Gen3DAdv.utils.adv_utils import CrossEntropyAdvLoss, LogitsAdvLoss, UntargetedLogitsAdvLoss
+from attack.Gen3DAdv.utils.dist_utils import L2Dist, ClipPointsLinf
 from model.curvenet import CurveNet
 from model.pointnet import PointNetCls, feature_transform_regularizer
 from model.pointnet2_MSG import PointNet_Msg
@@ -62,7 +63,7 @@ if __name__ == "__main__":
                         help="Model to use, ['PointNet', 'PointNet++Msg','DGCNN', 'CurveNet']")
     parser.add_argument('--dataset', type=str, default='Bosphorus',
                         help='dataset : Bosphorus | Eurecom')
-    parser.add_argument('--feature_transform', type=str2bool, default=False,
+    parser.add_argument('--feature_transform', type=str2bool, default=True,
                         help='whether to use STN on features in PointNet')
     parser.add_argument('--dropout', type=float, default=0.5, help='parameters in DGCNN: dropout rate')
     parser.add_argument('--batch_size', type=int, default=1, metavar='BS',
@@ -88,13 +89,11 @@ if __name__ == "__main__":
                         help='number of class')
     parser.add_argument('--budget', default=0.18,type=float,
                         help='budget parameter in the clip function, use 0.18 | 0.45')
-    # parser.add_argument('--feature_transform', action='store_true',
-    #                    help="use feature transform")
     args = parser.parse_args()
 
 
     if args.model == 'PointNet':
-        model = PointNetCls(k=args.num_of_class, feature_transform=False)
+        model = PointNetCls(k=args.num_of_class, feature_transform=args.feature_transform)
     elif args.model == 'PointNet++Msg':
         model = PointNet_Msg(args.num_of_class, normal_channel=False)
     elif args.model == 'PointNet++Ssg':

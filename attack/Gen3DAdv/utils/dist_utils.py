@@ -135,7 +135,7 @@ class KNNDist(nn.Module):
         inner = -2. * torch.matmul(pc.transpose(2, 1), pc)  # [B, K, K]
         xx = torch.sum(pc ** 2, dim=1, keepdim=True)  # [B, 1, K]
         dist = xx + inner + xx.transpose(2, 1)  # [B, K, K], l2^2
-        assert dist.min().item() >= -1e-6
+        # assert dist.min().item() >= -1e-6
         # the min is self so we take top (k + 1)
         neg_value, _ = (-dist).topk(k=self.k + 1, dim=-1)
         # [B, K, k + 1]
@@ -157,6 +157,32 @@ class KNNDist(nn.Module):
         if batch_avg:
             return loss.mean()
         return loss
+
+class ClipPointsLinf(nn.Module):
+
+    def __init__(self, budget):
+        """Clip point cloud with a given l_inf budget.
+        Args:
+            budget (float): perturbation budget
+        """
+        super(ClipPointsLinf, self).__init__()
+
+        self.budget = budget
+
+    def forward(self, pc, ori_pc):
+        """Clipping every point in a point cloud.
+        Args:
+            pc (torch.FloatTensor): batch pc, [B, 3, K]
+            ori_pc (torch.FloatTensor): original point cloud
+        """
+        with torch.no_grad():
+            diff = pc - ori_pc  # [B, 3, K]
+            norm = torch.sum(diff ** 2, dim=1) ** 0.5  # [B, K]
+            scale_factor = self.budget / (norm + 1e-9)  # [B, K]
+            scale_factor = torch.clamp(scale_factor, max=1.)  # [B, K]
+            diff = diff * scale_factor[:, None, :]
+            pc = ori_pc + diff
+        return pc
 
 
 class ChamferkNNDist(nn.Module):

@@ -10,6 +10,7 @@ from attack.CW.CW_utils.basic_util import str2bool, set_seed
 from attack.KNN.KNN_attack import CWKNN
 from attack.CW.CW_utils.adv_utils import CrossEntropyAdvLoss, LogitsAdvLoss, UntargetedLogitsAdvLoss
 from attack.CW.CW_utils.dist_utils import L2Dist, ClipPointsLinf, ChamferkNNDist
+from attack.CW.CW_utils.clip_utils import  ClipPointsLinf, ProjectInnerClipLinf
 from model.curvenet import CurveNet
 from model.pointnet import PointNetCls, feature_transform_regularizer
 from model.pointnet2_MSG import PointNet_Msg
@@ -82,7 +83,7 @@ if __name__ == "__main__":
                         help='lr in CW optimization')
     parser.add_argument('--binary_step', type=int, default=1, metavar='N',
                         help='Binary search step')
-    parser.add_argument('--num_iter', type=int, default=100, metavar='N',
+    parser.add_argument('--num_iter', type=int, default=2500, metavar='N',
                         help='Number of iterations in each search step')
     parser.add_argument('--local_rank', default=-1, type=int,
                         help='node rank for distributed training')
@@ -154,7 +155,7 @@ if __name__ == "__main__":
     dist_func = ChamferkNNDist(chamfer_method='adv2ori',
                                knn_k=5, knn_alpha=1.05,
                                chamfer_weight=5., knn_weight=3.)
-    clip_func = ClipPointsLinf(budget=args.budget)
+    clip_func = ProjectInnerClipLinf(budget=args.budget)
 
 
     # hyper-parameters from their official tensorflow code

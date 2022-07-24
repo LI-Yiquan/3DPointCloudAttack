@@ -106,8 +106,8 @@ class CWKNN:
             backward_time += t3 - t2
 
             # clipping and projection!
-            # adv_data.data = self.clip_func(adv_data.clone().detach(),
-            #                                ori_data, normal)
+            adv_data.data = self.clip_func(adv_data.clone().detach(),
+                                           ori_data, normal)
 
 
             t4 = time.time()

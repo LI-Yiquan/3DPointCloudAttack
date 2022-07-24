@@ -39,6 +39,9 @@ def cal_loss(pred, gold, smoothing=True):
 sys.path.append("../")
 parser = argparse.ArgumentParser()
 parser.add_argument(
+    '--model', type=str, default='PointNet',
+    help='model type: PointNet or PointNet++Ssg or PointNet++Msg or DGCNN or CurveNet')
+parser.add_argument(
     '--batchSize', type=int, default=10, help='input batch size')
 parser.add_argument(
     '--workers', type=int, help='number of data loading workers', default=0)
@@ -53,12 +56,9 @@ parser.add_argument(
 parser.add_argument(
     '--emb_dims', type=int, default=1024, metavar='N', help='parameters in DGCNN: Dimension of embeddings')
 parser.add_argument(
-    '--model', type=str, default='PointNet', help='model type: PointNet or PointNet++Ssg or PointNet++Msg or '
-                                                       'DGCNN or CurveNet')
-parser.add_argument(
     '--dataset', type=str, default='Bosphorus', help="dataset: Bosphorus | Eurecom")
 parser.add_argument(
-    '--feature_transform', action='store_true', help="use feature transform")
+    '--feature_transform', default=True, help="use feature transform in PointNet")
 
 opt = parser.parse_args()
 print(opt)
@@ -165,9 +165,6 @@ for epoch in range(opt.nepoch):
         loss.backward()
         optimizer.step()
         pred_choice = pred.data.max(1)[1]
-        if 105 in target:
-            print("target:",target)
-            print("pred:",pred_choice)
         correct = pred_choice.eq(target.data).cpu().sum()
         count_right = count_right + correct.item()
         count = count + len(target)
@@ -193,5 +190,5 @@ for epoch in range(opt.nepoch):
         if not os.path.isdir(os.path.join(root, '%s/%s' % (opt.outf, opt.dataset))):
             os.makedirs(os.path.join(root, '%s/%s' % (opt.outf, opt.dataset)))
         print("best test acc: {:.4} saved!".format(best))
-        #torch.save(classifier.state_dict(), '%s/%s/%s_model_on_%s.pth' % (opt.outf, opt.dataset, opt.model,
-        #                                                                  opt.dataset))
+        torch.save(classifier.state_dict(), '%s/%s/%s_model_on_%s.pth' % (opt.outf, opt.dataset, opt.model,
+                                                                          opt.dataset))
