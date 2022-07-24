@@ -83,6 +83,7 @@ class CW:
         pred = torch.argmax(logits, dim=1)
         print("ori label:",pred.item())
 
+
         if self.attack_method == 'top1_error':
             pred_max1 = logits.topk(5, dim=1, largest=True, sorted=True)[1][0][1]
             target =label_val= pred_max1.unsqueeze(0)

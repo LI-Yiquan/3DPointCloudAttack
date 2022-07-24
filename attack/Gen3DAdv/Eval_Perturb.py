@@ -159,6 +159,7 @@ if __name__ == "__main__":
                   binary_step=args.binary_step,
                   num_iter=args.num_iter,clip_func=clip_func,attack_method=args.attack_method)
 
+
     # run attack
     attacked_data, real_label, target_label, success_num= attack()
 
