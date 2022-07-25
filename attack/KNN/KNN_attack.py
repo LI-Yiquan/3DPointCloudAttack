@@ -5,6 +5,12 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 
+def rand_row(array, dim_needed):
+
+    row_total = array.shape[0]
+    row_sequence = np.arange(row_total)
+    np.random.shuffle(row_sequence)
+    return array[row_sequence[0:dim_needed], :]
 
 class CWKNN:
     """Class for CW attack.
@@ -24,6 +30,9 @@ class CWKNN:
         self.attack_lr = attack_lr
         self.num_iter = num_iter
         self.attack_method = attack_method
+        self.shuffle_fail = 0
+        self.trans_fail = 0
+        self.attack_fail = 0
 
     def attack(self, data, target):
         """Attack on given data to target.
@@ -39,10 +48,11 @@ class CWKNN:
 
         # points and normals
         if ori_data.shape[1] == 3:
-            normal = None
+            normal = ori_data
         else:
             normal = ori_data[:, 3:, :]
             ori_data = ori_data[:, :3, :]
+
 
         logits, _, _ = self.model(ori_data)  # [B, num_classes]
         pred = torch.argmax(logits, dim=1)
@@ -106,8 +116,8 @@ class CWKNN:
             backward_time += t3 - t2
 
             # clipping and projection!
-            adv_data.data = self.clip_func(adv_data.clone().detach(),
-                                           ori_data, normal)
+
+            adv_data.data = self.clip_func(adv_data.clone().detach(),ori_data,normal)
 
 
             t4 = time.time()
@@ -131,6 +141,33 @@ class CWKNN:
         # return final results
         print('Successfully attack {}/{}'.format(success_num, B))
 
+        # Test attack
+        attack_result = adv_data
+        attack_result = attack_result.float().cuda()
+        attack_logits, _, _ = self.model(attack_result)
+        print('attack result: ', torch.argmax(attack_logits, dim=1).item())
+        if self.attack_method == 'untarget':
+            if torch.argmax(attack_logits, dim=1) == target:
+                self.attack_fail += 1
+                print("attack fail: ", self.attack_fail)
+        else:
+            if torch.argmax(attack_logits, dim=1) != target:
+                self.attack_fail += 1
+                print("attack fail: ", self.attack_fail)
+
+        # Test transfer attack
+        transfer_result = adv_data
+        transfer_result = transfer_result.float().cuda()
+        transfer_logits, _, _ = self.trans_model(transfer_result)
+        print('transfer result: ', torch.argmax(transfer_logits, dim=1).item())
+        if self.attack_method == 'untarget':
+            if torch.argmax(transfer_logits, dim=1) == target:
+                self.trans_fail += 1
+                print("trans fail: ", self.trans_fail)
+        else:
+            if torch.argmax(transfer_logits, dim=1) != target:
+                self.trans_fail += 1
+                print("trans fail: ", self.trans_fail)
         # in their implementation, they estimate the normal of adv_pc
         # we don't do so here because it's useless in our task
         adv_data = adv_data.transpose(1, 2).contiguous()  # [B, K, 3]

@@ -19,6 +19,13 @@ from model.dgcnn import DGCNN
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
+def rand_row(array, dim_needed):
+
+    row_total = array.shape[0]
+    row_sequence = np.arange(row_total)
+    np.random.shuffle(row_sequence)
+    return array[row_sequence[0:dim_needed], :]
+
 def attack():
     model.eval()
     all_adv_pc = []
@@ -26,25 +33,67 @@ def attack():
     all_target_lbl = []
     num = 0
     trans_num = 0
-    for i, data in tqdm(enumerate(test_loader, 0)):
-        pc, label = data
-        target = torch.tensor([label])
-        pc, target_label = pc.to(device='cuda', dtype=torch.float), target.cuda().float()
+    if args.attack_method == 'untarget':
+        for i, data in tqdm(enumerate(test_loader, 0)):
+            pc, label = data
+            target = torch.tensor([label])
+            pc, target_label = pc.to(device='cuda', dtype=torch.float), target.cuda().float()
 
-        # attack!
-        best_pc, success_num = attacker.attack(pc, target_label)
+            # attack!
+            best_pc, success_num = attacker.attack(pc, target_label)
 
-        #data_root = os.path.expanduser("~//yq_pointnet//attack/CW/AdvData/PointNet")
-        #adv_f = '{}-{}-{}.txt'.format(i, int(label.detach().cpu().numpy()), int(target_label.detach().cpu().numpy()))
-        #adv_fname = os.path.join(data_root, adv_f)
-        #if success_num == 1:
-        #    np.savetxt(adv_fname, best_pc.squeeze(0), fmt='%.04f')
-        # results
-        num += success_num
+            #data_root = os.path.expanduser("~//yq_pointnet//attack/CW/AdvData/PointNet")
+            #adv_f = '{}-{}-{}.txt'.format(i, int(label.detach().cpu().numpy()), int(target_label.detach().cpu().numpy()))
+            #adv_fname = os.path.join(data_root, adv_f)
+            #if success_num == 1:
+            #    np.savetxt(adv_fname, best_pc.squeeze(0), fmt='%.04f')
+            # results
+            num += success_num
 
-        all_adv_pc.append(best_pc)
-        all_real_lbl.append(label.detach().cpu().numpy())
-        all_target_lbl.append(target_label.detach().cpu().numpy())
+            all_adv_pc.append(best_pc)
+            all_real_lbl.append(label.detach().cpu().numpy())
+            all_target_lbl.append(target_label.detach().cpu().numpy())
+    else:
+        data_root = os.path.expanduser('~//yq_pointnet//AddData//face0424.txt')
+        point_cloud_data = np.loadtxt(data_root, delimiter=',')
+        point_cloud_data = rand_row(point_cloud_data, 4000)
+        point_cloud_data = point_cloud_data[:, 0:3]
+        center = np.expand_dims(np.mean(point_cloud_data, axis=0), 0)
+        point_cloud_data = point_cloud_data - center  # center
+        dist = np.max(np.sqrt(np.sum(point_cloud_data ** 2, axis=1)), 0)
+        point_cloud_data = point_cloud_data / dist  # scale
+        pc = torch.from_numpy(point_cloud_data.astype(np.float))
+        pc = pc.unsqueeze(0)
+        for j in range(0, 105):
+            label = torch.tensor([105])
+            alist = []
+            target = j
+            alist.append(target)
+            target = torch.tensor(alist)
+            # target = target[:, 0]
+            # pc = pc.transpose(2, 1)
+
+            pc, target_label, label = pc.to(device='cuda',
+                                            dtype=torch.float), target.cuda().float(), label.cuda().float()
+            print(target_label)
+            print(label)
+            # attack!
+            best_pc, success_num = attacker.attack(pc, target_label)
+
+            '''
+            data_root = os.path.expanduser("~//yq_pointnet//attack/AOF/AdvData/{}".format(args.model))
+            adv_f = '{}.txt'.format(int(target_label.detach().cpu().numpy()))
+            adv_fname = os.path.join(data_root, adv_f)
+            best_pc = best_pc.squeeze(0)
+            best_pc = best_pc * dist + center
+            # if success_num == 1:
+            # np.savetxt(adv_fname, best_pc, fmt='%.04f')
+            '''
+            # results
+            num += success_num
+            all_adv_pc.append(best_pc)
+            all_real_lbl.append(label.detach().cpu().numpy())
+            all_target_lbl.append(target_label.detach().cpu().numpy())
 
     # accumulate results
     all_adv_pc = np.concatenate(all_adv_pc, axis=0)  # [num_data, K, 3]
@@ -57,7 +106,7 @@ if __name__ == "__main__":
     # Training settings
     parser = argparse.ArgumentParser(description='Point Cloud Recognition')
     parser.add_argument('--attack_method', type=str, default='untarget', help="untarget | top1_error")
-    parser.add_argument('--model', type=str, default='PointNet++Msg', metavar='N',
+    parser.add_argument('--model', type=str, default='PointNet', metavar='N',
                         help="Model to use, ['PointNet', 'PointNet++Msg','DGCNN', 'CurveNet']")
     parser.add_argument('--trans_model', type=str, default='PointNet++Msg', metavar='N',
                         help="Model to use, ['PointNet', 'PointNet++Msg','DGCNN', 'CurveNet']")
@@ -83,7 +132,7 @@ if __name__ == "__main__":
                         help='lr in CW optimization')
     parser.add_argument('--binary_step', type=int, default=1, metavar='N',
                         help='Binary search step')
-    parser.add_argument('--num_iter', type=int, default=2500, metavar='N',
+    parser.add_argument('--num_iter', type=int, default=500, metavar='N',
                         help='Number of iterations in each search step')
     parser.add_argument('--local_rank', default=-1, type=int,
                         help='node rank for distributed training')
@@ -97,7 +146,7 @@ if __name__ == "__main__":
 
 
     if args.model == 'PointNet':
-        model = PointNetCls(k=args.num_of_class, feature_transform=False)
+        model = PointNetCls(k=args.num_of_class, feature_transform=True)
     elif args.model == 'PointNet++Msg':
         model = PointNet_Msg(args.num_of_class, normal_channel=False)
     elif args.model == 'PointNet++Ssg':
@@ -116,7 +165,7 @@ if __name__ == "__main__":
     model.to(device)
 
     if args.trans_model == 'PointNet':
-        trans_model = PointNetCls(k=args.num_of_class, feature_transform=False)
+        trans_model = PointNetCls(k=args.num_of_class, feature_transform=True)
     elif args.trans_model == 'PointNet++Msg':
         trans_model = PointNet_Msg(args.num_of_class, normal_channel=False)
     elif args.trans_model == 'PointNet++Ssg':

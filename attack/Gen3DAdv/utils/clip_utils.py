@@ -128,9 +128,11 @@ class ProjectInnerClipLinf(nn.Module):
             ori_pc (torch.FloatTensor): original point cloud
             normal (torch.FloatTensor, optional): normals. Defaults to None.
         """
+
         with torch.no_grad():
             # project
             pc = self.project_inner(pc, ori_pc, normal)
+
             # clip
             pc = self.clip_linf(pc, ori_pc)
-        return
+        return pc

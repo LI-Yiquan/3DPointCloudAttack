@@ -240,15 +240,6 @@ class CW:
                 self.shuffle_fail += 1
                 print("shuffle fail: ", self.shuffle_fail)
 
-        randperm_result = o_bestattack.transpose((0, 2, 1))
-        randperm_result = torch.from_numpy(randperm_result)
-        randperm_result = randperm_result[0,torch.randperm(randperm_result.size(1))].unsqueeze(0)
-        randperm_result = randperm_result.transpose(2,1)
-        randperm_result = randperm_result.float().cuda()
-
-        randperm_logits, _, _ = self.model(randperm_result)
-        print('randperm result: ', torch.argmax(randperm_logits, dim=1).item())
-
 
         # Test transfer attack
         transfer_result = o_bestattack

@@ -133,4 +133,4 @@ class ProjectInnerClipLinf(nn.Module):
             pc = self.project_inner(pc, ori_pc, normal)
             # clip
             pc = self.clip_linf(pc, ori_pc)
-        return
+        return pc
