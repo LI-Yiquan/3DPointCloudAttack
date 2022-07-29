@@ -76,7 +76,7 @@ class PointCloudAttack(object):
             num_of_class = 52
 
         if args.surrogate_model == 'PointNet':
-            surrogate_model = PointNetCls(k=num_of_class, feature_transform=False)
+            surrogate_model = PointNetCls(k=num_of_class, feature_transform=True)
         elif args.surrogate_model== 'PointNet++Msg':
             surrogate_model = PointNet_Msg(num_of_class, normal_channel=False)
         elif args.surrogate_model == 'DGCNN':
@@ -87,7 +87,7 @@ class PointCloudAttack(object):
             exit('wrong surrogate model type')
 
         if args.target_model == 'PointNet':
-            target_model = PointNetCls(k=num_of_class, feature_transform=False)
+            target_model = PointNetCls(k=num_of_class, feature_transform=True)
         elif args.target_model== 'PointNet++Msg':
             target_model = PointNet_Msg(num_of_class, normal_channel=False)
         elif args.target_model == 'DGCNN':
@@ -611,6 +611,13 @@ class PointCloudAttack(object):
                 shuffled_logits, _, _ = self.classifier(self.pre_head(shuffled_adv_points))
             else:
                 shuffled_logits, _, _ = self.classifier(shuffled_adv_points)  # [1, num_class]
+        print('before shuffle label: ', adv_target)
+        print('after shuffle label: ', shuffled_logits.max(1)[1])
+        with torch.no_grad():
+            if not self.defense_method is None:
+                shuffled_logits, _, _ = self.classifier(self.pre_head(shuffled_adv_points))
+            else:
+                shuffled_logits, _, _ = self.classifier(shuffled_adv_points)
         print('before shuffle label: ', adv_target)
         print('after shuffle label: ', shuffled_logits.max(1)[1])
 

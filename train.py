@@ -58,7 +58,7 @@ parser.add_argument(
 parser.add_argument(
     '--dataset', type=str, default='Bosphorus', help="dataset: Bosphorus | Eurecom")
 parser.add_argument(
-    '--feature_transform', default=True, help="use feature transform in PointNet")
+    '--feature_transform', default=False, help="use feature transform in PointNet")
 
 opt = parser.parse_args()
 print(opt)

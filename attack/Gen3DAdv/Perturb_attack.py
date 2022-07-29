@@ -23,8 +23,9 @@ class CW:
     """Class for CW attack.
     """
 
-    def __init__(self, model, trans_model, adv_func, clip_func, dist_func, attack_lr=1e-2,
+    def __init__(self, model, pt_model,ptm_model,pts_model,dgcnn_model, adv_func, clip_func, dist_func, attack_lr=1e-2,
                  init_weight=10., max_weight=80., binary_step=10, num_iter=500, attack_method="untarget"):
+
         """CW attack by perturbing points.
         Args:
             model (torch.nn.Module): victim model
@@ -39,8 +40,18 @@ class CW:
 
         self.model = model.cuda()
         self.model.eval()
-        self.trans_model = trans_model.cuda()
-        self.trans_model.eval()
+        self.pt_model = pt_model.cuda()
+        self.pt_model.eval()
+
+        self.ptm_model = ptm_model.cuda()
+        self.ptm_model.eval()
+
+        self.pts_model = pts_model.cuda()
+        self.pts_model.eval()
+
+        self.dgcnn_model = dgcnn_model.cuda()
+        self.dgcnn_model.eval()
+
         self.adv_func = adv_func
         self.dist_func = dist_func
         self.attack_lr = attack_lr
@@ -51,8 +62,13 @@ class CW:
         self.clip_func = clip_func
         self.attack_method = attack_method
         self.shuffle_fail = 0
-        self.trans_fail = 0
+        self.pt_fail = 0
+        self.ptm_fail = 0
+        self.pts_fail = 0
+        self.dgcnn_fail = 0
         self.attack_fail = 0
+
+
 
     def attack(self, data, target):
         """Attack on given data to target.
@@ -83,11 +99,10 @@ class CW:
         pred = torch.argmax(logits, dim=1)
         print("ori label:",pred.item())
 
-
-        if self.attack_method == 'top1_error':
-            pred_max1 = logits.topk(5, dim=1, largest=True, sorted=True)[1][0][1]
-            target =label_val= pred_max1.unsqueeze(0)
-            print(target.item())
+        # if self.attack_method == 'target':
+        #     pred_max1 = logits.topk(5, dim=1, largest=True, sorted=True)[1][0][1]
+        #     target =label_val= pred_max1.unsqueeze(0)
+        #     print(target.item())
 
         # perform binary search
 
@@ -210,6 +225,7 @@ class CW:
         o_bestattack[fail_idx] = input_val[fail_idx]
 
         # Test attack
+        '''
         attack_result = o_bestattack
         attack_result = torch.from_numpy(attack_result)
         attack_result = attack_result.float().cuda()
@@ -223,6 +239,7 @@ class CW:
             if torch.argmax(attack_logits, dim=1) != target:
                 self.attack_fail += 1
                 print("attack fail: ", self.attack_fail)
+        '''
 
         # Test shuffle attack
         attack_result = o_bestattack.transpose((0, 2, 1))
@@ -241,30 +258,64 @@ class CW:
                 self.shuffle_fail += 1
                 print("shuffle fail: ", self.shuffle_fail)
 
-        randperm_result = o_bestattack.transpose((0, 2, 1))
-        randperm_result = torch.from_numpy(randperm_result)
-        randperm_result = randperm_result[0,torch.randperm(randperm_result.size(1))].unsqueeze(0)
-        randperm_result = randperm_result.transpose(2,1)
-        randperm_result = randperm_result.float().cuda()
-
-        randperm_logits, _, _ = self.model(randperm_result)
-        print('randperm result: ', torch.argmax(randperm_logits, dim=1).item())
-
 
         # Test transfer attack
         transfer_result = o_bestattack
         transfer_result = torch.from_numpy(transfer_result)
         transfer_result = transfer_result.float().cuda()
-        transfer_logits, _, _ = self.trans_model(transfer_result)
-        print('transfer result: ', torch.argmax(transfer_logits, dim=1).item())
+        transfer_logits, _, _ = self.pt_model(transfer_result)
+        print('pointnet result: ', torch.argmax(transfer_logits, dim=1).item())
         if self.attack_method == 'untarget':
             if torch.argmax(transfer_logits, dim=1) == target:
-                self.trans_fail+=1
-                print("trans fail: ", self.trans_fail)
+                self.pt_fail+=1
+                print("pointnet fail: ", self.pt_fail)
         else:
             if torch.argmax(transfer_logits, dim=1) != target:
-                self.trans_fail += 1
-                print("trans fail: ", self.trans_fail)
+                self.pt_fail += 1
+                print("pointnet fail: ", self.pt_fail)
+
+        transfer_result = o_bestattack
+        transfer_result = torch.from_numpy(transfer_result)
+        transfer_result = transfer_result.float().cuda()
+        transfer_logits, _, _ = self.ptm_model(transfer_result)
+        print('pointnet++msg result: ', torch.argmax(transfer_logits, dim=1).item())
+        if self.attack_method == 'untarget':
+            if torch.argmax(transfer_logits, dim=1) == target:
+                self.ptm_fail += 1
+                print("pointnet++msg fail: ", self.ptm_fail)
+        else:
+            if torch.argmax(transfer_logits, dim=1) != target:
+                self.ptm_fail += 1
+                print("pointnet++msg fail: ", self.ptm_fail)
+
+
+        transfer_result = o_bestattack
+        transfer_result = torch.from_numpy(transfer_result)
+        transfer_result = transfer_result.float().cuda()
+        transfer_logits, _, _ = self.pts_model(transfer_result)
+        print('pointnet++ssg result: ', torch.argmax(transfer_logits, dim=1).item())
+        if self.attack_method == 'untarget':
+            if torch.argmax(transfer_logits, dim=1) == target:
+                self.pts_fail += 1
+                print("pointnet++ssg fail: ", self.pts_fail)
+        else:
+            if torch.argmax(transfer_logits, dim=1) != target:
+                self.pts_fail += 1
+                print("pointnet++ssg fail: ", self.pts_fail)
+
+        transfer_result = o_bestattack
+        transfer_result = torch.from_numpy(transfer_result)
+        transfer_result = transfer_result.float().cuda()
+        transfer_logits, _, _ = self.dgcnn_model(transfer_result)
+        print('dgcnn result: ', torch.argmax(transfer_logits, dim=1).item())
+        if self.attack_method == 'untarget':
+            if torch.argmax(transfer_logits, dim=1) == target:
+                self.dgcnn_fail += 1
+                print("dgcnn fail: ", self.dgcnn_fail)
+        else:
+            if torch.argmax(transfer_logits, dim=1) != target:
+                self.dgcnn_fail += 1
+                print("dgcnn fail: ", self.dgcnn_fail)
 
 
         return o_bestdist, o_bestattack.transpose((0, 2, 1)), success_num

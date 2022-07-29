@@ -38,10 +38,10 @@ def attack():
             pc, label = data
             target = torch.tensor([label])
             pc, target_label = pc.to(device='cuda', dtype=torch.float), target.cuda().float()
-
+                
             # attack!
             best_pc, success_num = attacker.attack(pc, target_label)
-
+    
             #data_root = os.path.expanduser("~//yq_pointnet//attack/CW/AdvData/PointNet")
             #adv_f = '{}-{}-{}.txt'.format(i, int(label.detach().cpu().numpy()), int(target_label.detach().cpu().numpy()))
             #adv_fname = os.path.join(data_root, adv_f)
@@ -50,7 +50,7 @@ def attack():
             # results
             num += success_num
 
-            all_adv_pc.append(best_pc)
+            append = all_adv_pc.append(best_pc)
             all_real_lbl.append(label.detach().cpu().numpy())
             all_target_lbl.append(target_label.detach().cpu().numpy())
     else:
@@ -75,25 +75,27 @@ def attack():
 
             pc, target_label, label = pc.to(device='cuda',
                                             dtype=torch.float), target.cuda().float(), label.cuda().float()
-            print(target_label)
-            print(label)
+            print("target label as",target_label.item())
             # attack!
             best_pc, success_num = attacker.attack(pc, target_label)
 
-            '''
-            data_root = os.path.expanduser("~//yq_pointnet//attack/AOF/AdvData/{}".format(args.model))
+            data_root = os.path.expanduser("~//yq_pointnet//attack/KNN/AdvData/{}".format(args.model))
+            if not os.path.exists(data_root):
+                os.mkdir(data_root)
             adv_f = '{}.txt'.format(int(target_label.detach().cpu().numpy()))
             adv_fname = os.path.join(data_root, adv_f)
             best_pc = best_pc.squeeze(0)
             best_pc = best_pc * dist + center
-            # if success_num == 1:
-            # np.savetxt(adv_fname, best_pc, fmt='%.04f')
-            '''
+            if success_num == 1:
+                np.savetxt(adv_fname, best_pc, fmt='%.04f')
+
             # results
             num += success_num
             all_adv_pc.append(best_pc)
             all_real_lbl.append(label.detach().cpu().numpy())
             all_target_lbl.append(target_label.detach().cpu().numpy())
+
+
 
     # accumulate results
     all_adv_pc = np.concatenate(all_adv_pc, axis=0)  # [num_data, K, 3]
@@ -105,10 +107,10 @@ def attack():
 if __name__ == "__main__":
     # Training settings
     parser = argparse.ArgumentParser(description='Point Cloud Recognition')
-    parser.add_argument('--attack_method', type=str, default='untarget', help="untarget | top1_error")
-    parser.add_argument('--model', type=str, default='PointNet', metavar='N',
+    parser.add_argument('--attack_method', type=str, default='untarget', help="untarget | target")
+    parser.add_argument('--model', type=str, default='PointNet++Msg', metavar='N',
                         help="Model to use, ['PointNet', 'PointNet++Msg','DGCNN', 'CurveNet']")
-    parser.add_argument('--trans_model', type=str, default='PointNet++Msg', metavar='N',
+    parser.add_argument('--trans_model', type=str, default='PointNet++Ssg', metavar='N',
                         help="Model to use, ['PointNet', 'PointNet++Msg','DGCNN', 'CurveNet']")
     parser.add_argument('--dataset', type=str, default='Bosphorus',
                         help='dataset : Bosphorus | Eurecom')
@@ -126,16 +128,14 @@ if __name__ == "__main__":
     parser.add_argument('--adv_func', type=str, default='logits',
                         choices=['logits', 'cross_entropy'],
                         help='Adversarial loss function to use')
-    parser.add_argument('--kappa', type=float, default=15,
+    parser.add_argument('--kappa', type=float, default=30,
                         help='min margin in logits adv loss')
     parser.add_argument('--attack_lr', type=float, default=1e-2,
                         help='lr in CW optimization')
     parser.add_argument('--binary_step', type=int, default=1, metavar='N',
                         help='Binary search step')
-    parser.add_argument('--num_iter', type=int, default=500, metavar='N',
+    parser.add_argument('--num_iter', type=int, default=100, metavar='N',
                         help='Number of iterations in each search step')
-    parser.add_argument('--local_rank', default=-1, type=int,
-                        help='node rank for distributed training')
     parser.add_argument('--num_of_class', default=105+1, type=int,
                         help='number of class')
     parser.add_argument('--budget', default=0.18,type=float,
@@ -146,7 +146,7 @@ if __name__ == "__main__":
 
 
     if args.model == 'PointNet':
-        model = PointNetCls(k=args.num_of_class, feature_transform=True)
+        model = PointNetCls(k=args.num_of_class, feature_transform=False)
     elif args.model == 'PointNet++Msg':
         model = PointNet_Msg(args.num_of_class, normal_channel=False)
     elif args.model == 'PointNet++Ssg':
@@ -165,7 +165,7 @@ if __name__ == "__main__":
     model.to(device)
 
     if args.trans_model == 'PointNet':
-        trans_model = PointNetCls(k=args.num_of_class, feature_transform=True)
+        trans_model = PointNetCls(k=args.num_of_class, feature_transform=False)
     elif args.trans_model == 'PointNet++Msg':
         trans_model = PointNet_Msg(args.num_of_class, normal_channel=False)
     elif args.trans_model == 'PointNet++Ssg':
@@ -177,11 +177,33 @@ if __name__ == "__main__":
     else:
         exit('wrong model type')
 
-    trans_model.load_state_dict(
+    pt_model = PointNetCls(k=args.num_of_class, feature_transform=False)
+    pt_model.load_state_dict(
         torch.load(os.path.expanduser(
-            '~//yq_pointnet//cls//{}//{}_model_on_{}.pth'.format(args.dataset, args.trans_model, args.dataset))))
-    trans_model.eval()
-    trans_model.to(device)
+            '~//yq_pointnet//cls//{}//{}_model_on_{}.pth'.format(args.dataset, 'PointNet', args.dataset))))
+    pt_model.eval()
+    pt_model.to(device)
+
+    ptm_model = PointNet_Msg(args.num_of_class, normal_channel=False)
+    ptm_model.load_state_dict(
+        torch.load(os.path.expanduser(
+            '~//yq_pointnet//cls//{}//{}_model_on_{}.pth'.format(args.dataset, 'PointNet++Msg', args.dataset))))
+    ptm_model.eval()
+    ptm_model.to(device)
+
+    pts_model = PointNet_Ssg(args.num_of_class)
+    pts_model.load_state_dict(
+        torch.load(os.path.expanduser(
+            '~//yq_pointnet//cls//{}//{}_model_on_{}.pth'.format(args.dataset, 'PointNet++Ssg', args.dataset))))
+    pts_model.eval()
+    pts_model.to(device)
+
+    dgcnn_model = DGCNN(args, output_channels=args.num_of_class).to(device)
+    dgcnn_model.load_state_dict(
+        torch.load(os.path.expanduser(
+            '~//yq_pointnet//cls//{}//{}_model_on_{}.pth'.format(args.dataset, 'DGCNN', args.dataset))))
+    dgcnn_model.eval()
+    dgcnn_model.to(device)
 
     test_dataset_path = os.path.expanduser("~//yq_pointnet//BosphorusDB//eval.csv")
     test_set = Bosphorus_Dataset(test_dataset_path)
@@ -208,7 +230,7 @@ if __name__ == "__main__":
 
 
     # hyper-parameters from their official tensorflow code
-    attacker = CWKNN(model=model, trans_model=trans_model,adv_func=adv_func, dist_func=dist_func,
+    attacker = CWKNN(model=model, pt_model=pt_model,ptm_model=ptm_model,pts_model=pts_model,dgcnn_model=dgcnn_model,adv_func=adv_func, dist_func=dist_func,
                   attack_lr=args.attack_lr,
                   num_iter=args.num_iter,clip_func=clip_func,attack_method=args.attack_method)
 
@@ -216,9 +238,9 @@ if __name__ == "__main__":
     attacked_data, real_label, target_label, success_num= attack()
 
     # accumulate results
-    data_num = len(test_set)
-    success_rate = float(success_num) / float(data_num)
-    print("data num: ", data_num)
+    # data_num = len(test_set)
+    # success_rate = float(success_num) / float(data_num)
+
 
 
 

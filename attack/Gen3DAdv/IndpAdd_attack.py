@@ -5,6 +5,12 @@ import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
 
+def rand_row(array):
+    row_total = array.shape[1]
+    row_sequence = np.arange(row_total)
+    np.random.shuffle(row_sequence)
+    return array[:, row_sequence, :]
+
 
 def get_critical_points(model, pc, label, num):
     """Get top num important point coordinates for given model and pc.
@@ -71,6 +77,9 @@ class CWAdd:
         self.num_iter = num_iter
         self.num_add = num_add
         self.attack_method = attack_method
+        self.attack_fail = 0
+        self.shuffle_fail = 0
+        self.trans_fail = 0
 
     def attack(self, data, target):
         """Attack on given data to target.
@@ -227,6 +236,53 @@ class CWAdd:
         # return final results
         success_num = (lower_bound > 0.).sum()
         print('Successfully attack {}/{}'.format(success_num, B))
+        # Test attack
+        attack_result = o_bestattack
+        attack_result = torch.from_numpy(attack_result)
+        attack_result = attack_result.float().cuda()
+        attack_logits, _, _ = self.model(attack_result)
+        print('attack result: ', torch.argmax(attack_logits, dim=1).item())
+        if self.attack_method == 'untarget':
+            if torch.argmax(attack_logits, dim=1) == target:
+                self.attack_fail += 1
+                print("attack fail: ", self.attack_fail)
+        else:
+            if torch.argmax(attack_logits, dim=1) != target:
+                self.attack_fail += 1
+                print("attack fail: ", self.attack_fail)
+
+        # Test shuffle attack
+        attack_result = o_bestattack.transpose((0, 2, 1))
+        attack_result = rand_row(attack_result)
+        attack_result = torch.from_numpy(attack_result.transpose((0, 2, 1)))
+        attack_result = attack_result.float().cuda()
+
+        shuffle_logits, _, _ = self.model(attack_result)
+        print('shuffle result: ', torch.argmax(shuffle_logits, dim=1).item())
+        if self.attack_method == 'untarget':
+            if torch.argmax(shuffle_logits, dim=1) == target:
+                self.shuffle_fail += 1
+                print("shuffle fail: ", self.shuffle_fail)
+        else:
+            if torch.argmax(shuffle_logits, dim=1) != target:
+                self.shuffle_fail += 1
+                print("shuffle fail: ", self.shuffle_fail)
+
+        # Test transfer attack
+        transfer_result = o_bestattack
+        transfer_result = torch.from_numpy(transfer_result)
+        transfer_result = transfer_result.float().cuda()
+        transfer_logits, _, _ = self.trans_model(transfer_result)
+        print('transfer result: ', torch.argmax(transfer_logits, dim=1).item())
+        if self.attack_method == 'untarget':
+            if torch.argmax(transfer_logits, dim=1) == target:
+                self.trans_fail += 1
+                print("trans fail: ", self.trans_fail)
+        else:
+            if torch.argmax(transfer_logits, dim=1) != target:
+                self.trans_fail += 1
+                print("trans fail: ", self.trans_fail)
+
 
         # concatenate added and clean points
         ori_data = ori_data.detach().cpu().numpy()  # [B, 3, K]

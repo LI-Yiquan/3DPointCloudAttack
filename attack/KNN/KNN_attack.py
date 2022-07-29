@@ -16,13 +16,24 @@ class CWKNN:
     """Class for CW attack.
     """
 
-    def __init__(self, model, trans_model,adv_func, dist_func, clip_func,
+    def __init__(self, model, pt_model,ptm_model,pts_model,dgcnn_model,adv_func, dist_func, clip_func,
                  attack_lr=1e-3, num_iter=2500,attack_method='untarget'):
 
         self.model = model.cuda()
         self.model.eval()
-        self.trans_model = trans_model.cuda()
-        self.trans_model.eval()
+
+
+        self.pt_model = pt_model.cuda()
+        self.pt_model.eval()
+
+        self.ptm_model = ptm_model.cuda()
+        self.ptm_model.eval()
+
+        self.pts_model = pts_model.cuda()
+        self.pts_model.eval()
+
+        self.dgcnn_model = dgcnn_model.cuda()
+        self.dgcnn_model.eval()
 
         self.adv_func = adv_func
         self.dist_func = dist_func
@@ -33,6 +44,10 @@ class CWKNN:
         self.shuffle_fail = 0
         self.trans_fail = 0
         self.attack_fail = 0
+        self.pt_fail = 0
+        self.ptm_fail = 0
+        self.pts_fail = 0
+        self.dgcnn_fail = 0
 
     def attack(self, data, target):
         """Attack on given data to target.
@@ -57,10 +72,7 @@ class CWKNN:
         logits, _, _ = self.model(ori_data)  # [B, num_classes]
         pred = torch.argmax(logits, dim=1)
         print("ori label:", pred.item())
-        if self.attack_method == 'top1_error':
-            pred_max1 = logits.topk(5, dim=1, largest=True, sorted=True)[1][0][1]
-            target = pred_max1.unsqueeze(0)
-            print(target.item())
+
 
         target = target.long().cuda().detach()
 
@@ -155,19 +167,60 @@ class CWKNN:
                 self.attack_fail += 1
                 print("attack fail: ", self.attack_fail)
 
+
         # Test transfer attack
         transfer_result = adv_data
         transfer_result = transfer_result.float().cuda()
-        transfer_logits, _, _ = self.trans_model(transfer_result)
-        print('transfer result: ', torch.argmax(transfer_logits, dim=1).item())
+        transfer_logits, _, _ = self.pt_model(transfer_result)
+        print('pointnet result: ', torch.argmax(transfer_logits, dim=1).item())
         if self.attack_method == 'untarget':
             if torch.argmax(transfer_logits, dim=1) == target:
-                self.trans_fail += 1
-                print("trans fail: ", self.trans_fail)
+                self.pt_fail+=1
+                print("pointnet fail: ", self.pt_fail)
         else:
             if torch.argmax(transfer_logits, dim=1) != target:
-                self.trans_fail += 1
-                print("trans fail: ", self.trans_fail)
+                self.pt_fail += 1
+                print("pointnet fail: ", self.pt_fail)
+
+        transfer_result = adv_data
+        transfer_result = transfer_result.float().cuda()
+        transfer_logits, _, _ = self.ptm_model(transfer_result)
+        print('pointnet++msg result: ', torch.argmax(transfer_logits, dim=1).item())
+        if self.attack_method == 'untarget':
+            if torch.argmax(transfer_logits, dim=1) == target:
+                self.ptm_fail += 1
+                print("pointnet++msg fail: ", self.ptm_fail)
+        else:
+            if torch.argmax(transfer_logits, dim=1) != target:
+                self.ptm_fail += 1
+                print("pointnet++msg fail: ", self.ptm_fail)
+
+
+        transfer_result = adv_data
+        transfer_result = transfer_result.float().cuda()
+        transfer_logits, _, _ = self.pts_model(transfer_result)
+        print('pointnet++ssg result: ', torch.argmax(transfer_logits, dim=1).item())
+        if self.attack_method == 'untarget':
+            if torch.argmax(transfer_logits, dim=1) == target:
+                self.pts_fail += 1
+                print("pointnet++ssg fail: ", self.pts_fail)
+        else:
+            if torch.argmax(transfer_logits, dim=1) != target:
+                self.pts_fail += 1
+                print("pointnet++ssg fail: ", self.pts_fail)
+
+        transfer_result = adv_data
+        transfer_result = transfer_result.float().cuda()
+        transfer_logits, _, _ = self.dgcnn_model(transfer_result)
+        print('dgcnn result: ', torch.argmax(transfer_logits, dim=1).item())
+        if self.attack_method == 'untarget':
+            if torch.argmax(transfer_logits, dim=1) == target:
+                self.dgcnn_fail += 1
+                print("dgcnn fail: ", self.dgcnn_fail)
+        else:
+            if torch.argmax(transfer_logits, dim=1) != target:
+                self.dgcnn_fail += 1
+                print("dgcnn fail: ", self.dgcnn_fail)
         # in their implementation, they estimate the normal of adv_pc
         # we don't do so here because it's useless in our task
         adv_data = adv_data.transpose(1, 2).contiguous()  # [B, K, 3]
