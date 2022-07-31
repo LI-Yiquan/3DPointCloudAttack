@@ -23,7 +23,7 @@ class CW:
     """Class for CW attack.
     """
 
-    def __init__(self, model, pt_model,ptm_model,pts_model,dgcnn_model, adv_func, clip_func, dist_func, attack_lr=1e-2,
+    def __init__(self, model, pt_model,ptm_model,pts_model,dgcnn_model,cur_model, adv_func, clip_func, dist_func, attack_lr=1e-2,
                  init_weight=10., max_weight=80., binary_step=10, num_iter=500, attack_method="untarget"):
 
         """CW attack by perturbing points.
@@ -52,6 +52,9 @@ class CW:
         self.dgcnn_model = dgcnn_model.cuda()
         self.dgcnn_model.eval()
 
+        self.cur_model = cur_model.cuda()
+        self.cur_model.eval()
+
         self.adv_func = adv_func
         self.dist_func = dist_func
         self.attack_lr = attack_lr
@@ -66,6 +69,7 @@ class CW:
         self.ptm_fail = 0
         self.pts_fail = 0
         self.dgcnn_fail = 0
+        self.cur_fail = 0
         self.attack_fail = 0
 
 
@@ -224,42 +228,10 @@ class CW:
         fail_idx = (lower_bound == 0.)
         o_bestattack[fail_idx] = input_val[fail_idx]
 
-        # Test attack
-        '''
-        attack_result = o_bestattack
-        attack_result = torch.from_numpy(attack_result)
-        attack_result = attack_result.float().cuda()
-        attack_logits, _, _ = self.model(attack_result)
-        print('attack result: ', torch.argmax(attack_logits, dim=1).item())
-        if self.attack_method == 'untarget':
-            if torch.argmax(attack_logits, dim=1) == target:
-                self.attack_fail += 1
-                print("attack fail: ", self.attack_fail)
-        else:
-            if torch.argmax(attack_logits, dim=1) != target:
-                self.attack_fail += 1
-                print("attack fail: ", self.attack_fail)
-        '''
-
-        # Test shuffle attack
-        attack_result = o_bestattack.transpose((0, 2, 1))
-        attack_result = rand_row(attack_result)
-        attack_result = torch.from_numpy(attack_result.transpose((0, 2, 1)))
-        attack_result = attack_result.float().cuda()
-
-        shuffle_logits, _, _ = self.model(attack_result)
-        print('shuffle result: ',torch.argmax(shuffle_logits, dim=1).item())
-        if self.attack_method == 'untarget':
-            if torch.argmax(shuffle_logits, dim=1) == target:
-                self.shuffle_fail+=1
-                print("shuffle fail: ", self.shuffle_fail)
-        else:
-            if torch.argmax(shuffle_logits, dim=1) != target:
-                self.shuffle_fail += 1
-                print("shuffle fail: ", self.shuffle_fail)
 
 
         # Test transfer attack
+
         transfer_result = o_bestattack
         transfer_result = torch.from_numpy(transfer_result)
         transfer_result = transfer_result.float().cuda()
@@ -318,4 +290,26 @@ class CW:
                 print("dgcnn fail: ", self.dgcnn_fail)
 
 
+        transfer_result = o_bestattack
+        transfer_result = torch.from_numpy(transfer_result)
+        transfer_result = transfer_result.float().cuda()
+        transfer_logits, _, _ = self.cur_model(transfer_result)
+        print('curvenet result: ', torch.argmax(transfer_logits, dim=1).item())
+        if self.attack_method == 'untarget':
+            if torch.argmax(transfer_logits, dim=1) == target:
+                self.cur_fail += 1
+                print("curvenet fail: ", self.cur_fail)
+        else:
+            if torch.argmax(transfer_logits, dim=1) != target:
+                self.cur_fail += 1
+                print("curvenet fail: ", self.cur_fail)
+
+
+
+
+        attack_result = o_bestattack.transpose((0, 2, 1))
+        attack_result = rand_row(attack_result)
+        attack_result = torch.from_numpy(attack_result.transpose((0, 2, 1)))
+        attack_result = attack_result.float().cuda()
+        shuffle_logits, _, _ = self.model(attack_result)
         return o_bestdist, o_bestattack.transpose((0, 2, 1)), success_num

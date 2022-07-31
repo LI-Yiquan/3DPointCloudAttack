@@ -16,7 +16,7 @@ class CWKNN:
     """Class for CW attack.
     """
 
-    def __init__(self, model, pt_model,ptm_model,pts_model,dgcnn_model,adv_func, dist_func, clip_func,
+    def __init__(self, model, pt_model,ptm_model,pts_model,dgcnn_model,cur_model,adv_func, dist_func, clip_func,
                  attack_lr=1e-3, num_iter=2500,attack_method='untarget'):
 
         self.model = model.cuda()
@@ -35,6 +35,9 @@ class CWKNN:
         self.dgcnn_model = dgcnn_model.cuda()
         self.dgcnn_model.eval()
 
+        self.cur_model = cur_model.cuda()
+        self.cur_model.eval()
+
         self.adv_func = adv_func
         self.dist_func = dist_func
         self.clip_func = clip_func
@@ -48,6 +51,7 @@ class CWKNN:
         self.ptm_fail = 0
         self.pts_fail = 0
         self.dgcnn_fail = 0
+        self.cur_fail = 0
 
     def attack(self, data, target):
         """Attack on given data to target.
@@ -221,6 +225,20 @@ class CWKNN:
             if torch.argmax(transfer_logits, dim=1) != target:
                 self.dgcnn_fail += 1
                 print("dgcnn fail: ", self.dgcnn_fail)
+
+        transfer_result = adv_data
+        transfer_result = transfer_result.float().cuda()
+        transfer_logits, _, _ = self.cur_model(transfer_result)
+        print('curvenet result: ', torch.argmax(transfer_logits, dim=1).item())
+        if self.attack_method == 'untarget':
+            if torch.argmax(transfer_logits, dim=1) == target:
+                self.cur_fail += 1
+                print("curvenet fail: ", self.cur_fail)
+        else:
+            if torch.argmax(transfer_logits, dim=1) != target:
+                self.cur_fail += 1
+                print("curvenet fail: ", self.cur_fail)
+
         # in their implementation, they estimate the normal of adv_pc
         # we don't do so here because it's useless in our task
         adv_data = adv_data.transpose(1, 2).contiguous()  # [B, K, 3]

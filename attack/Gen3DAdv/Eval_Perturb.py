@@ -77,8 +77,7 @@ def attack():
 
             pc, target_label, label = pc.to(device='cuda',
                                             dtype=torch.float), target.cuda().float(), label.cuda().float()
-            print(target_label)
-            print(label)
+
             # attack!
             _, best_pc, success_num = attacker.attack(pc, target_label)
 
@@ -108,8 +107,8 @@ def attack():
 if __name__ == "__main__":
     # Training settings
     parser = argparse.ArgumentParser(description='Point Cloud Recognition')
-    parser.add_argument('--attack_method', type=str, default='untarget', help="untarget | target")
-    parser.add_argument('--model', type=str, default='PointNet++Msg', metavar='N',
+    parser.add_argument('--attack_method', type=str, default='target', help="untarget | target")
+    parser.add_argument('--model', type=str, default='CurveNet', metavar='N',
                         help="Model to use, ['PointNet', 'PointNet++Msg','DGCNN', 'CurveNet']")
     parser.add_argument('--dataset', type=str, default='Bosphorus',
                         help='dataset : Bosphorus | Eurecom')
@@ -133,7 +132,7 @@ if __name__ == "__main__":
                         help='lr in CW optimization')
     parser.add_argument('--binary_step', type=int, default=1, metavar='N',
                         help='Binary search step')
-    parser.add_argument('--num_iter', type=int, default=100, metavar='N',
+    parser.add_argument('--num_iter', type=int, default=10, metavar='N',
                         help='Number of iterations in each search step')
     parser.add_argument('--num_of_class', default=105+1, type=int,
                         help='number of class')
@@ -190,6 +189,13 @@ if __name__ == "__main__":
     dgcnn_model.eval()
     dgcnn_model.to(device)
 
+    cur_model = CurveNet(num_classes=args.num_of_class)
+    cur_model.load_state_dict(
+        torch.load(os.path.expanduser(
+            '~//yq_pointnet//cls//{}//{}_model_on_{}.pth'.format(args.dataset, 'CurveNet', args.dataset))))
+    cur_model.eval()
+    cur_model.to(device)
+
 
 
     test_dataset_path = os.path.expanduser("~//yq_pointnet//BosphorusDB//eval.csv")
@@ -215,7 +221,9 @@ if __name__ == "__main__":
 
 
     # hyper-parameters from their official tensorflow code
-    attacker = CW(model=model, pt_model=pt_model,ptm_model=ptm_model,pts_model=pts_model,dgcnn_model=dgcnn_model,adv_func=adv_func, dist_func=dist_func,
+    attacker = CW(model=model, pt_model=pt_model,ptm_model=ptm_model,pts_model=pts_model,dgcnn_model=dgcnn_model,
+                  cur_model=cur_model,
+                  adv_func=adv_func, dist_func=dist_func,
                   attack_lr=args.attack_lr,
                   init_weight=10., max_weight=80.,
                   binary_step=args.binary_step,
