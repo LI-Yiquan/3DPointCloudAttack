@@ -132,7 +132,7 @@ if __name__ == "__main__":
                         help='lr in CW optimization')
     parser.add_argument('--binary_step', type=int, default=1, metavar='N',
                         help='Binary search step')
-    parser.add_argument('--num_iter', type=int, default=10, metavar='N',
+    parser.add_argument('--num_iter', type=int, default=100, metavar='N',
                         help='Number of iterations in each search step')
     parser.add_argument('--num_of_class', default=105+1, type=int,
                         help='number of class')
