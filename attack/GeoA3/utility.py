@@ -8,11 +8,14 @@ import time
 
 import numpy as np
 import scipy.io as sio
-from pytorch3d.ops import knn_points, knn_gather
+from attack.GeoA3.knn_utils import knn_points, knn_gather
+
 import torch
 from torch.autograd import Variable
 import torchvision
 import torchvision.transforms as transforms
+
+device = torch.device("cuda:6" if torch.cuda.is_available() else "cpu")
 
 import matplotlib
 matplotlib.use('Agg')
@@ -34,7 +37,7 @@ def jitter_input(data, sigma=0.01, clip=0.05):
     assert data.size(1) == 3
     assert(clip > 0)
     B, _, N = data.size()
-    jittered_data = torch.clamp(sigma * torch.randn(B, 3, N), -1*clip, clip).cuda()
+    jittered_data = torch.clamp(sigma * torch.randn(B, 3, N), -1*clip, clip).to(device)
     return jittered_data
 
 def estimate_normal(pc, k):
@@ -109,8 +112,8 @@ def estimate_normal_via_ori_normal(pc_adv, pc_ori, normal_ori, k):
 
 def get_perpendicular_jitter(vector, sigma=0.01, clip=0.05):
     b,_,n=vector.size()
-    aux_vector1 = sigma * torch.randn(b,3,n).cuda()
-    aux_vector2 = sigma * torch.randn(b,3,n).cuda()
+    aux_vector1 = sigma * torch.randn(b,3,n).to(device)
+    aux_vector2 = sigma * torch.randn(b,3,n).to(device)
     return torch.clamp(torch.cross(vector, aux_vector1), -1*clip, clip) + torch.clamp(torch.cross(vector, aux_vector2), -1*clip, clip)
 
 def estimate_perpendicular(pc, k, sigma=0.01, clip=0.05):
@@ -143,8 +146,8 @@ def estimate_perpendicular(pc, k, sigma=0.01, clip=0.05):
         perpendi_vector_1 = torch.stack(perpendi_vector_1, 0) #perpendi_vector_1:[b, 3, n]
         perpendi_vector_2 = torch.stack(perpendi_vector_2, 0) #perpendi_vector_1:[b, 3, n]
 
-        aux_vector1 = sigma * torch.randn(b,n).unsqueeze(1).cuda() #aux_vector1:[b, 1, n]
-        aux_vector2 = sigma * torch.randn(b,n).unsqueeze(1).cuda() #aux_vector2:[b, 1, n]
+        aux_vector1 = sigma * torch.randn(b,n).unsqueeze(1).to(device) #aux_vector1:[b, 1, n]
+        aux_vector2 = sigma * torch.randn(b,n).unsqueeze(1).to(device) #aux_vector2:[b, 1, n]
 
     return torch.clamp(perpendi_vector_1*aux_vector1, -1*clip, clip) + torch.clamp(perpendi_vector_2*aux_vector2, -1*clip, clip)
 
@@ -176,8 +179,8 @@ def farthest_points_sample(obj_points, num_points):
     assert obj_points.size(1) == 3
     b,_,n = obj_points.size()
 
-    selected = torch.randint(obj_points.size(2), [obj_points.size(0),1]).cuda()
-    dists = torch.full([obj_points.size(0), obj_points.size(2)], fill_value = np.inf).cuda()
+    selected = torch.randint(obj_points.size(2), [obj_points.size(0),1]).to(device)
+    dists = torch.full([obj_points.size(0), obj_points.size(2)], fill_value = np.inf).to(device)
 
     for _ in range(num_points - 1):
         dists = torch.min(dists, torch.norm(obj_points - torch.gather(obj_points, 2, selected[:,-1].unsqueeze(1).unsqueeze(2).expand(b,3,1)), dim = 1))
@@ -191,8 +194,8 @@ def farthest_points_normal_sample(obj_points, obj_normal, num_points):
     assert obj_points.size(2) == obj_normal.size(2)
     b,_,n = obj_points.size()
 
-    selected = torch.randint(obj_points.size(2), [obj_points.size(0),1]).cuda()
-    dists = torch.full([obj_points.size(0), obj_points.size(2)], fill_value = np.inf).cuda()
+    selected = torch.randint(obj_points.size(2), [obj_points.size(0),1]).to(device)
+    dists = torch.full([obj_points.size(0), obj_points.size(2)], fill_value = np.inf).to(device)
 
     for _ in range(num_points - 1):
         dists = torch.min(dists, torch.norm(obj_points - torch.gather(obj_points, 2, selected[:,-1].unsqueeze(1).unsqueeze(2).expand(b,3,1)), dim = 1))
@@ -204,13 +207,13 @@ def farthest_points_normal_sample(obj_points, obj_normal, num_points):
 
 
 def pad_larger_tensor_with_index(small_verts, small_in_larger_idx_list, larger_tensor_shape):
-    full_deform_verts = torch.zeros(larger_tensor_shape,3).cuda()
+    full_deform_verts = torch.zeros(larger_tensor_shape,3).to(device)
     full_deform_verts[small_in_larger_idx_list] = small_verts
     return full_deform_verts
 
 def pad_larger_tensor_with_index_batch(small_verts, small_in_larger_idx_list, larger_tensor_shape):
     b, _, n = small_verts.size()
-    full_deform_verts = torch.zeros(b, 3, larger_tensor_shape).cuda()
+    full_deform_verts = torch.zeros(b, 3, larger_tensor_shape).to(device)
     for i in range(b):
         full_deform_verts[i, :, small_in_larger_idx_list[i][0][1:]] = small_verts[i]
     return full_deform_verts

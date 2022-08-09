@@ -70,7 +70,7 @@ parser.add_argument(
 opt = parser.parse_args()
 print(opt)
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:6" if torch.cuda.is_available() else "cpu")
 
 # print(device)
 

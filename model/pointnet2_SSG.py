@@ -8,7 +8,7 @@ import numpy as np
 import torch.nn.functional as F
 from model.pointnet2_utils import PointNetSetAbstractionMsg, PointNetSetAbstraction
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:6" if torch.cuda.is_available() else "cpu")
 '''
     PointNet
 '''

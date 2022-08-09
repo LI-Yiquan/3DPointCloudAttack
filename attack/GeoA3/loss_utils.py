@@ -1,26 +1,34 @@
 from __future__ import absolute_import, division, print_function
 
 import argparse
+from collections import namedtuple
+from typing import Union
+
 import math
 import os
 import sys
 import time
 
 import numpy as np
-from pytorch3d.ops import knn_points, knn_gather
+# from pytorch3d.ops import knn_points, knn_gather
+from attack.GeoA3.knn_utils import knn_points, knn_gather
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.autograd import Variable
+from torch.autograd.function import once_differentiable, Function
 from torch.autograd.gradcheck import zero_gradients
 
+from pointnet import pointnet2_utils
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_DIR = BASE_DIR + '/../'
-sys.path.append(BASE_DIR)
-sys.path.append(os.path.join(ROOT_DIR, 'Model'))
-from utility import _normalize
+# BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# ROOT_DIR = BASE_DIR + '/../'
+# sys.path.append(BASE_DIR)
+# sys.path.append(os.path.join(ROOT_DIR, 'Model'))
+from attack.GeoA3.utility import _normalize
 
+device = torch.device("cuda:6" if torch.cuda.is_available() else "cpu")
 
 def norm_l2_loss(adv_pc, ori_pc):
     return ((adv_pc - ori_pc)**2).sum(1).sum(1)
@@ -158,7 +166,7 @@ def uniform_loss(adv_pc, percentages=[0.004,0.006,0.008,0.010,0.012], radius=1.0
         nsample = int(n*p)
         r = math.sqrt(p*radius)
         disk_area = math.pi *(radius ** 2) * p/nsample
-        expect_len = torch.sqrt(torch.Tensor([disk_area])).cuda()
+        expect_len = torch.sqrt(torch.Tensor([disk_area])).to(device)
 
         adv_pc_flipped = adv_pc.transpose(1, 2).contiguous()
         new_xyz = pointnet2_utils.gather_operation(adv_pc_flipped, pointnet2_utils.furthest_point_sample(adv_pc, npoint)).transpose(1, 2).contiguous() # (batch_size, npoint, 3)

@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 
 
-def np2torch(tensor, device='cuda'):
+def np2torch(tensor, device=torch.device("cuda:6" if torch.cuda.is_available() else "cpu")):
     if isinstance(tensor, list):
         tensor = [torch.from_numpy(t).to(device) for t in tensor]
     else:

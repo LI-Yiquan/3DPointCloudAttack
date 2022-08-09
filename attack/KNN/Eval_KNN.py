@@ -1,5 +1,7 @@
 import os
 import random
+
+import pandas as pd
 from tqdm import tqdm
 import argparse
 import numpy as np
@@ -9,7 +11,7 @@ from dataset.bosphorus_dataset import Bosphorus_Dataset
 from attack.CW.CW_utils.basic_util import str2bool, set_seed
 from attack.KNN.KNN_attack import CWKNN
 from attack.CW.CW_utils.adv_utils import CrossEntropyAdvLoss, LogitsAdvLoss, UntargetedLogitsAdvLoss
-from attack.CW.CW_utils.dist_utils import L2Dist, ClipPointsLinf, ChamferkNNDist
+from attack.CW.CW_utils.dist_utils import L2Dist, ClipPointsLinf, ChamferkNNDist, ChamferDist
 from attack.CW.CW_utils.clip_utils import  ClipPointsLinf, ProjectInnerClipLinf
 from model.curvenet import CurveNet
 from model.pointnet import PointNetCls, feature_transform_regularizer
@@ -54,17 +56,19 @@ def attack():
             all_real_lbl.append(label.detach().cpu().numpy())
             all_target_lbl.append(target_label.detach().cpu().numpy())
     else:
-        data_root = os.path.expanduser('~//yq_pointnet//AddData//face0424.txt')
-        point_cloud_data = np.loadtxt(data_root, delimiter=',')
-        point_cloud_data = rand_row(point_cloud_data, 4000)
-        point_cloud_data = point_cloud_data[:, 0:3]
+
+        data_root = os.path.expanduser('~//yq_pointnet//AddData//face0803.txt')
+        point_cloud_data = np.loadtxt(data_root, delimiter=' ')
+        point_cloud_data_ori = rand_row(point_cloud_data, 4000)
+        point_cloud_data = point_cloud_data_ori[:, 0:3]
+        point_cloud_data_rest = point_cloud_data_ori[:,3:5]
         center = np.expand_dims(np.mean(point_cloud_data, axis=0), 0)
         point_cloud_data = point_cloud_data - center  # center
         dist = np.max(np.sqrt(np.sum(point_cloud_data ** 2, axis=1)), 0)
         point_cloud_data = point_cloud_data / dist  # scale
         pc = torch.from_numpy(point_cloud_data.astype(np.float))
         pc = pc.unsqueeze(0)
-        for j in range(0, 105):
+        for j in range(0,1):
             label = torch.tensor([105])
             alist = []
             target = j
@@ -86,6 +90,8 @@ def attack():
             adv_fname = os.path.join(data_root, adv_f)
             best_pc = best_pc.squeeze(0)
             best_pc = best_pc * dist + center
+            best_pc = np.hstack((best_pc,point_cloud_data_rest))
+            print(best_pc)
             if success_num == 1:
                 np.savetxt(adv_fname, best_pc, fmt='%.04f')
 
@@ -98,9 +104,9 @@ def attack():
 
 
     # accumulate results
-    all_adv_pc = np.concatenate(all_adv_pc, axis=0)  # [num_data, K, 3]
-    all_real_lbl = np.concatenate(all_real_lbl, axis=0)  # [num_data]
-    all_target_lbl = np.concatenate(all_target_lbl, axis=0)  # [num_data]
+    # all_adv_pc = np.concatenate(all_adv_pc, axis=0)  # [num_data, K, 3]
+    # all_real_lbl = np.concatenate(all_real_lbl, axis=0)  # [num_data]
+    # all_target_lbl = np.concatenate(all_target_lbl, axis=0)  # [num_data]
     return all_adv_pc, all_real_lbl, all_target_lbl, num
 
 
@@ -108,7 +114,7 @@ if __name__ == "__main__":
     # Training settings
     parser = argparse.ArgumentParser(description='Point Cloud Recognition')
     parser.add_argument('--attack_method', type=str, default='target', help="untarget | target")
-    parser.add_argument('--model', type=str, default='PointNet++Msg', metavar='N',
+    parser.add_argument('--model', type=str, default='PointNet', metavar='N',
                         help="Model to use, ['PointNet', 'PointNet++Msg','DGCNN', 'CurveNet']")
     parser.add_argument('--trans_model', type=str, default='PointNet', metavar='N',
                         help="Model to use, ['PointNet', 'PointNet++Msg','DGCNN', 'CurveNet']")
@@ -134,7 +140,7 @@ if __name__ == "__main__":
                         help='lr in CW optimization')
     parser.add_argument('--binary_step', type=int, default=1, metavar='N',
                         help='Binary search step')
-    parser.add_argument('--num_iter', type=int, default=10, metavar='N',
+    parser.add_argument('--num_iter', type=int, default=100, metavar='N',
                         help='Number of iterations in each search step')
     parser.add_argument('--num_of_class', default=105+1, type=int,
                         help='number of class')
@@ -230,9 +236,11 @@ if __name__ == "__main__":
         adv_func = UntargetedLogitsAdvLoss(kappa=args.kappa)
 
 
-    dist_func = ChamferkNNDist(chamfer_method='adv2ori',
-                               knn_k=5, knn_alpha=1.05,
-                               chamfer_weight=5., knn_weight=3.)
+    # dist_func = ChamferkNNDist(chamfer_method='adv2ori',
+    #                            knn_k=5, knn_alpha=1.05,
+    #                            chamfer_weight=5., knn_weight=3.)
+
+    dist_func = ChamferDist()
     clip_func = ProjectInnerClipLinf(budget=args.budget)
 
 

@@ -1,407 +1,152 @@
-from __future__ import absolute_import, division, print_function
-
-import argparse
-import math
 import os
-import sys
-
-import time
-
+import random
+from tqdm import tqdm
+import argparse
 import numpy as np
-import scipy.io as sio
 import torch
-import torch.nn as nn
-import torch.optim as optim
-#from pytorch3d_utils.io import load_obj, save_obj
-#from pytorch3d_utils.ops import sample_points_from_meshes
-#from pytorch3d_utils.structures import Meshes
-#from torch.autograd import Variable
-#from torch.autograd.gradcheck import zero_gradients
+from torch.utils.data import DataLoader
+from dataset.bosphorus_dataset import Bosphorus_Dataset
+
+from attack.Gen3DAdv.utils.basic_util import str2bool, set_seed
+from model.curvenet import CurveNet
 from model.pointnet import PointNetCls, feature_transform_regularizer
 from model.pointnet2_MSG import PointNet_Msg
 from model.pointnet2_SSG import PointNet_Ssg
 from model.dgcnn import DGCNN
-import torch.nn.functional as F
-from dataset.bosphorus_dataset import Bosphorus_Dataset
-from dataset.eurecom_dataset import Eurecom_Dataset
-import GeoA3_attacker as geoA3_attack
-from utility import (Average_meter, Count_converge_iter, Count_loss_iter,
-                         _compare, accuracy, estimate_normal_via_ori_normal,
-                         farthest_points_sample)
-sys.path.append("../")
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+from attack.GeoA3.GeoA3_attack import geoA3_attack
 
-def main(cfg):
-    if cfg.attack == 'GeoA3_mesh':
-        assert False, 'Not uploaded yet.'
+device = torch.device("cuda:6" if torch.cuda.is_available() else "cpu")
 
-    if cfg.attack_label == 'Untarget':
-        targeted = False
+print(device)
+def rand_row(array, dim_needed):
+
+    row_total = array.shape[0]
+    row_sequence = np.arange(row_total)
+    np.random.shuffle(row_sequence)
+    return array[row_sequence[0:dim_needed], :]
+
+
+def attack():
+    model.eval()
+    all_adv_pc = []
+    all_real_lbl = []
+    all_target_lbl = []
+    num = 0
+    trans_num = 0
+    if args.attack_method == 'untarget':
+        for i, data in tqdm(enumerate(test_loader, 0)):
+            pc, label = data
+            target = torch.tensor([label])
+            pc, target_label = pc.to(device=device, dtype=torch.float), target.to(device).float()
+
+            # attack!
+            _, best_pc, success_num = geoA3_attack(net=pt_model,pt_model=pt_model,ptm_model=ptm_model,pts_model=pts_model,dgcnn_model=dgcnn_model,
+                                                   cur_model=cur_model,pc=pc,label=target_label,cfg=args,i=i,loader_len=1)
+
+            # data_root = os.path.expanduser("~//yq_pointnet//attack/CW/AdvData/PointNet")
+            # adv_f = '{}-{}-{}.txt'.format(i, int(label.detach().cpu().numpy()), int(target_label.detach().cpu().numpy()))
+            # adv_fname = os.path.join(data_root, adv_f)
+            # if success_num == 1:
+            #     np.savetxt(adv_fname, best_pc.squeeze(0), fmt='%.04f')
+            # results
+            num += success_num
+
+            all_adv_pc.append(best_pc)
+            all_real_lbl.append(label.detach().cpu().numpy())
+            all_target_lbl.append(target_label.detach().cpu().numpy())
     else:
-        targeted = True
+        data_root = os.path.expanduser('~//yq_pointnet//AddData//face0424.txt')
+        point_cloud_data = np.loadtxt(data_root, delimiter=',')
+        point_cloud_data = rand_row(point_cloud_data, 4000)
+        point_cloud_data = point_cloud_data[:, 0:3]
+        center = np.expand_dims(np.mean(point_cloud_data, axis=0), 0)
+        point_cloud_data = point_cloud_data - center  # center
+        dist = np.max(np.sqrt(np.sum(point_cloud_data ** 2, axis=1)), 0)
+        point_cloud_data = point_cloud_data / dist  # scale
+        pc = torch.from_numpy(point_cloud_data.astype(np.float))
+        pc = pc.unsqueeze(0)
+        for j in range(0, 105):
+            label = torch.tensor([105])
+            alist = []
+            target = j
+            alist.append(target)
+            target = torch.tensor(alist)
+            # target = target[:, 0]
+            # pc = pc.transpose(2, 1)
 
-    print('=>Creating dir')
-    saved_root = os.path.join('Exps', cfg.arch + '_npoint' + str(cfg.npoint))
+            pc, target_label, label = pc.to(device=device,
+                                            dtype=torch.float), target.to(device).float(), label.to(device).float()
 
-    if cfg.attack == 'GeoA3' or cfg.attack == 'GeoA3_mesh':
-        saved_dir = str(cfg.attack) + '_' +  str(cfg.id) +  '_BiStep' + str(cfg.binary_max_steps) + '_IterStep' + str(cfg.iter_max_steps) + '_Opt' + cfg.optim  +  '_Lr' + str(cfg.lr) + '_Initcons' + str(cfg.initial_const) + '_' + cfg.cls_loss_type + '_' + str(cfg.dis_loss_type) + 'Loss' + str(cfg.dis_loss_weight)
+            # attack!
+            _, best_pc, success_num = geoA3_attack(pt_model,pc,target_label,args, i=1,loader_len=1)
 
-        if cfg.hd_loss_weight != 0:
-            saved_dir = saved_dir + '_HDLoss' + str(cfg.hd_loss_weight)
+            data_root = os.path.expanduser("~//yq_pointnet//attack/Gen3DAdv/AdvData/{}".format(args.model))
+            if not os.path.exists(data_root):
+                os.mkdir(data_root)
+            adv_f = '{}.txt'.format(int(target_label.detach().cpu().numpy()))
+            adv_fname = os.path.join(data_root, adv_f)
+            best_pc = best_pc.squeeze(0)
+            best_pc = best_pc * dist + center
+            if success_num == 1:
+                np.savetxt(adv_fname, best_pc, fmt='%.04f')
 
-        if cfg.curv_loss_weight != 0:
-            saved_dir = saved_dir + '_CurLoss' + str(cfg.curv_loss_weight) + '_k' + str(cfg.curv_loss_knn)
+            # results
+            num += success_num
+            all_adv_pc.append(best_pc)
+            all_real_lbl.append(label.detach().cpu().numpy())
+            all_target_lbl.append(target_label.detach().cpu().numpy())
 
-        if cfg.uniform_loss_weight != 0:
-            saved_dir = saved_dir + '_UniLoss' + str(cfg.uniform_loss_weight)
-
-        if cfg.laplacian_loss_weight != 0:
-            saved_dir = saved_dir + '_LapLoss' + str(cfg.laplacian_loss_weight)
-
-        if cfg.edge_loss_weight != 0:
-            saved_dir = saved_dir + '_EdgeLoss' + str(cfg.edge_loss_weight)
-
-        if cfg.is_partial_var:
-            saved_dir = saved_dir + '_PartOpt' + '_k' + str(cfg.knn_range)
-
-        if cfg.is_use_lr_scheduler:
-            saved_dir = saved_dir + '_LRExp'
-
-        if cfg.is_pro_grad:
-            saved_dir = saved_dir + '_ProGrad'
-            if cfg.is_real_offset:
-                saved_dir = saved_dir + 'RO'
-
-        if cfg.cc_linf != 0:
-            saved_dir = saved_dir + '_cclinf' + str(cfg.cc_linf)
-
-
-        if cfg.is_pre_jitter_input:
-            saved_dir = saved_dir + '_PreJitter' + str(cfg.jitter_sigma) + '_' + str(cfg.jitter_clip)
-            if cfg.is_previous_jitter_input:
-                saved_dir = saved_dir + '_PreviousMethod'
-            else:
-                saved_dir = saved_dir + '_estNormalVery' + str(cfg.calculate_project_jitter_noise_iter)
-
-    else:
-        assert cfg.attack == None
-        saved_dir = 'Evaluating_' + str(cfg.id)
-
-    saved_dir = os.path.join(saved_root, cfg.attack_label, saved_dir)
-    print('==>Successfully created {}'.format(saved_dir))
-
-    if cfg.attack == 'GeoA3_mesh':
-        trg_dir = os.path.join(saved_dir, 'Mesh')
-    else:
-        trg_dir = os.path.join(saved_dir, 'PC')
-    if not os.path.exists(trg_dir):
-        os.makedirs(trg_dir)
-    trg_dir = os.path.join(saved_dir, 'Mat')
-    if not os.path.exists(trg_dir):
-        os.makedirs(trg_dir)
-    trg_dir = os.path.join(saved_dir, 'Records')
-    if not os.path.exists(trg_dir):
-        os.makedirs(trg_dir)
-
-    if cfg.id == 0:
-        seed = 0
-    else:
-        seed = int(time.time())
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-
-    #data
-    """
-    if cfg.attack == 'GeoA3_mesh':
-        from Provider.modelnet10_instance250_mesh import \
-            ModelNet10_250instance_mesh
-        test_dataset = ModelNet10_250instance_mesh(resume=cfg.data_dir_file, attack_label= cfg.attack_label)
-    else:
-        if (str(cfg.npoint) in cfg.data_dir_file):
-            resample_num = -1
-        else:
-            # FIXME
-            #resample_num = cfg.npoint
-            resample_num = -1
-
-        from Provider.modelnet10_instance250 import ModelNet40
-        test_dataset = ModelNet40(data_mat_file=cfg.data_dir_file, attack_label=cfg.attack_label, resample_num=resample_num)
-    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=cfg.batch_size, shuffle=False, drop_last=False, num_workers=cfg.num_workers, pin_memory=True)
-    test_size = test_dataset.__len__()
-
-    if (cfg.is_save_normal) & (cfg.dense_data_dir_file is not None):
-        dense_test_dataset = ModelNet40(data_mat_file=cfg.dense_data_dir_file, attack_label=cfg.attack_label, resample_num=-1)
-        dense_test_loader = torch.utils.data.DataLoader(dense_test_dataset, batch_size=cfg.batch_size, shuffle=False, drop_last=False, num_workers=cfg.num_workers, pin_memory=True)
-        dense_test_size = dense_test_dataset.__len__()
-        dense_iter = iter(dense_test_loader)
-    else:
-        dense_iter = None
-    """
-
-    dense_iter = None
-
-    if cfg.dataset == 'Bosphorus':
-        dataset_path = os.path.expanduser("~//yq_pointnet//BosphorusDB//train.csv")
-        test_dataset_path = os.path.expanduser("~//yq_pointnet//BosphorusDB//eval.csv")
-        dataset = Bosphorus_Dataset(dataset_path)
-        test_dataset = Bosphorus_Dataset(test_dataset_path)
-        num_of_class = 105+1
-        cfg.batchSize = 10
-
-    elif cfg.dataset == 'Eurecom':
-        dataset_path = os.path.expanduser("~//yq_pointnet//EURECOM_Kinect_Face_Dataset//train.csv")
-        test_dataset_path = os.path.expanduser("~//yq_pointnet//EURECOM_Kinect_Face_Dataset//eval.csv")
-        dataset = Eurecom_Dataset(dataset_path)
-        test_dataset = Eurecom_Dataset(test_dataset_path)
-        num_of_class = 52
-
-    else:
-        exit('wrong dataset')
-
-    if cfg.model == 'PointNet':
-        net = PointNetCls(k=num_of_class, feature_transform=cfg.feature_transform)
-
-    elif cfg.model == 'PointNet++Msg':
-        net = PointNet_Msg(num_of_class, normal_channel=False)
-
-    elif cfg.model == 'PointNet++Ssg':
-        net = PointNet_Ssg(num_of_class)
-
-    elif cfg.model == 'DGCNN':
-        net = DGCNN(cfg, output_channels=num_of_class).to(device)
-
-    else:
-        exit('wrong model type')
-
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=cfg.batchSize,
-        shuffle=True,
-        num_workers=int(cfg.workers))
-
-    test_loader = testdataloader = torch.utils.data.DataLoader(
-        test_dataset,
-        batch_size=cfg.batchSize,
-        shuffle=True,
-        num_workers=int(cfg.workers))
-    dense_iter = iter(test_loader)
-    # model
-    print('=>Loading model')
-    '''
-    model_path = os.path.join('Pretrained', cfg.arch, str(cfg.npoint), 'model_best.pth.tar')
-    if cfg.arch == 'PointNet':
-        from Model.PointNet import PointNet
-        net = PointNet(cfg.classes, npoint=cfg.npoint).cuda()
-    elif cfg.arch == 'PointNetPP':
-        from Model.PointNetPP_ssg import PointNet2ClassificationSSG
-        net = PointNet2ClassificationSSG(use_xyz=True, use_normal=False).cuda()
-    else:
-        assert False, 'Not support such arch.'
-    '''
-    net.load_state_dict(
-        torch.load(os.path.expanduser(os.path.expanduser(
-            '~//yq_pointnet//cls//{}//{}_model_on_{}.pth'.format(cfg.dataset,cfg.model,cfg.dataset)))))
-    net.to(device)
-    net.eval()
-    # print('==>Successfully load pretrained-model from {}'.format('~//yq_pointnet//cls//PointNet_model_120_416.pth'))
-
-    # recording settings
-    if cfg.is_record_converged_steps:
-        cci = Count_converge_iter(os.path.join(saved_dir, 'Records'))
-    if cfg.is_record_loss:
-        cli = Count_loss_iter(os.path.join(saved_dir, 'Records'))
-
-    test_acc = Average_meter()
-    batch_vertice = []
-    batch_faces_idx = []
-    batch_gt_label = []
-
-    num_attack_success = 0
-    #cnt_ins = test_dataset.start_index
-    cnt_ins = 0
-    cnt_all = 0
-
-    if cfg.attack_label == 'Untarget':
-        targeted = False
-        num_attack_classes = 1
-    elif cfg.attack_label == 'Random':
-        targeted = True
-        num_attack_classes = 1
-    else:
-        targeted = True
-        num_attack_classes = 9
-
-    for i, data in enumerate(test_loader):
-        if cfg.attack == 'GeoA3_mesh':
-            vertex, _, gt_label = data[0], data[1], data[2]
-            gt_target = gt_label.view(-1).cuda()
-            bs, l, _, _ = vertex.size()
-            b = bs*l
-        else:
-            # print(data)
-            # pc = data[0]
-            # normal = data[1]
-            pc = normal = data[0]
-            # gt_labels = data[2]
-            gt_labels = data[1]
-            # if pc.size(3) == 3:
-            # pc = pc.permute(0, 1, 3, 2)
-            pc = pc.permute(0, 2, 1)
-            # if normal.size(3) == 3:
-            # normal = normal.permute(0, 1, 3, 2)
-            normal = normal.permute(0, 2, 1)
-
-            bs, l, n = pc.size()
-            b = bs*l
-            b = bs
-            pc = pc.view(b, 3, n).cuda()
-            normal = normal.view(b, 3, n).cuda()
-            gt_target = gt_labels.view(-1).cuda()
-
-            if dense_iter is not None:
-                dense_data = dense_iter.next()
-                dense_point = dense_normal = dense_data[0]
-                gt_labels = data[1]
-                dense_point = dense_point.permute(0, 2, 1)
-                dense_normal = dense_normal.permute(0, 2, 1)
-
-                bs, l, n = pc.size()
-                b = bs
-                '''
-                if dense_point.size(3) == 3:
-                    dense_point = dense_point.permute(0, 1, 3, 2)
-                if dense_normal.size(3) == 3:
-                    dense_normal = dense_normal.permute(0, 1, 3, 2)
-
-                bs, l, _, n = dense_point.size()
-                b = bs*l
-                '''
-                dense_point = dense_point.view(b, 3, n).cuda()
-                dense_normal = dense_normal.view(b, 3, n).cuda()
-
-        if cfg.attack is None:
-            if n == 10000:
-                for i in range(b):
-                    with torch.no_grad():
-                        output = net(pc[i].unsqueeze(0))
-                    acc = accuracy(output.data, gt_target[i].data.unsqueeze(0), topk=(1, ))
-                    test_acc.update(acc[0][0], 1)
-            else:
-                with torch.no_grad():
-                    output = net(pc)
-                acc = accuracy(output.data, gt_target.data, topk=(1, ))
-                test_acc.update(acc[0][0], output.size(0))
-            print("Prec@1 {top1.avg:.3f}".format(top1=test_acc))
-
-        elif cfg.attack == 'GeoA3':
-            adv_pc, targeted_label, attack_success_indicator, best_attack_step, loss = geoA3_attack.attack(net, data, cfg, i, len(test_loader), saved_dir)
-            eval_num = 1
-        # elif cfg.attack == 'GeoA3_mesh': adv_mesh, targeted_label, attack_success_indicator, best_attack_step,
-        # best_score = geoA3_mesh_attack.attack(net, data, cfg, i, len(test_loader), saved_dir) eval_num = 1
-        else:
-            assert False, "Wrong type of attack."
-
-        if cfg.attack == 'GeoA3':
-            if cfg.is_record_converged_steps:
-                cci.record_converge_iter(best_attack_step)
-            if cfg.is_record_loss:
-                cli.record_loss_iter(loss)
-
-            if cfg.is_save_normal:
-                with torch.no_grad():
-                    # the loop here is for memory save
-                    knn_normal = torch.zeros_like(adv_pc)
-                    for idx in range(b):
-                        knn_normal[idx] = estimate_normal_via_ori_normal(adv_pc[idx].unsqueeze(0), dense_point[idx].unsqueeze(0), dense_normal[idx].unsqueeze(0), k=3)
-                saved_normal = knn_normal.cpu().numpy()
-
-            for _ in range(0, eval_num):
-                with torch.no_grad():
-                    if adv_pc.size(2) > cfg.npoint:
-                        eval_points = farthest_points_sample(adv_pc, cfg.npoint)
-                    else:
-                        eval_points = adv_pc
-                    test_adv_output = net(eval_points)
-                attack_success_iter = _compare(torch.max(test_adv_output,1)[1].data, targeted_label, gt_target.cuda(), targeted)
-
-                try:
-                    attack_success += attack_success_iter
-                except:
-                    attack_success = attack_success_iter
-            saved_pc = adv_pc.cpu().clone().numpy()
-
-            for k in range(b):
-                if attack_success_indicator[k].item():
-                    num_attack_success += 1
-                    name = 'adv_' + str(cnt_ins+k//num_attack_classes) + '_gt' + str(gt_target[k].item()) + '_attack' + str(torch.max(test_adv_output,1)[1].data[k].item()) + '_expect' + str(targeted_label[k].item())
-
-                    if cfg.is_save_normal:
-                        sio.savemat(os.path.join(saved_dir, 'Mat', name+'.mat'),
-                        {"adversary_point_clouds": saved_pc[k], 'gt_label': gt_target[k].item(), 'attack_label': torch.max(test_adv_output,1)[1].data[k].item(), 'est_normal':saved_normal[k]})
-                    else:
-                        sio.savemat(os.path.join(saved_dir, 'Mat', name+'.mat'),
-                        {"adversary_point_clouds": saved_pc[k], 'gt_label': gt_target[k].item(), 'attack_label': torch.max(test_adv_output,1)[1].data[k].item()})
-
-                    fout = open(os.path.join(saved_dir, 'PC', name+'.obj'), 'w')
-                    for m in range(saved_pc.shape[2]):
-                        fout.write('v %f %f %f 0 0 0\n' % (saved_pc[k, 0, m], saved_pc[k, 1, m], saved_pc[k, 2, m]))
-                    fout.close()
-
-            cnt_ins = cnt_ins + bs
-            cnt_all = cnt_all + b
-        #elif cfg.attack == 'GeoA3_mesh':
-        #    for k in range(b):
-        #        if attack_success_indicator[k].item() and best_score[k] != -1:
-        #            num_attack_success += 1
-        #            name = 'adv_' + str(cnt_ins+k//num_attack_classes) + '_gt' + str(gt_target[k].item()) + '_attack' + str(best_score[k]) + '_expect' + str(targeted_label[k].item())
-        #            final_verts, final_faces = adv_mesh[k].get_mesh_verts_faces(0)
-        #            #save .mat
-        #            sio.savemat(os.path.join(saved_dir, 'Mat', name+'.mat'), {"vert": final_verts, "faces":final_faces})
-        #            #save .obj mesh
-        #            file_name = os.path.join(saved_dir, 'Mesh', name+'.obj')
-        #            save_obj(file_name, final_verts, final_faces)
-
-            cnt_ins = cnt_ins + bs
-            cnt_all = cnt_all + b
-
-    if cfg.is_record_converged_steps:
-        cci.save_converge_iter()
-        cci.plot_converge_iter_hist()
-    if cfg.is_record_loss:
-        cli.save_loss_iter()
-        cli.plot_loss_iter_hist()
+    # accumulate results
+    all_adv_pc = np.concatenate(all_adv_pc, axis=0)  # [num_data, K, 3]
+    all_real_lbl = np.concatenate(all_real_lbl, axis=0)  # [num_data]
+    all_target_lbl = np.concatenate(all_target_lbl, axis=0)  # [num_data]
+    return all_adv_pc, all_real_lbl, all_target_lbl, num
 
 
-    if cfg.attack == 'GeoA3':
-        print('attack success: {0:.2f}\n'.format(num_attack_success/float(cnt_all)*100))
-        with open(os.path.join(saved_dir, 'attack_result.txt'), 'at') as f:
-            f.write('attack success: {0:.2f}\n'.format(num_attack_success/float(cnt_all)*100))
-        print('saved_dir: {0}'.format(os.path.join(saved_dir)))
-
-    print('Finish!')
-
-    return saved_dir
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Point Cloud Attacking')
-    #------------Model-----------------------
-    parser.add_argument('--id', type=int, default=0, help='')
-    parser.add_argument('--arch', default='PointNet', type=str, metavar='ARCH', help='')
-    #------------Dataset-----------------------
-    parser.add_argument('--data_dir_file', default='Data/modelnet10_250instances1024_PointNet.mat', type=str, help='')
-    parser.add_argument('--dense_data_dir_file', default=None, type=str, help='')
-    parser.add_argument('-c', '--classes', default=40, type=int, metavar='N', help='num of classes (default: 40)')
-    parser.add_argument('-b', '--batch_size', default=2, type=int, metavar='B', help='batch_size (default: 2)')
+if __name__ == "__main__":
+    # Training settings
+    parser = argparse.ArgumentParser(description='Point Cloud Recognition')
+    parser.add_argument('--attack_method', type=str, default='untarget', help="untarget | target")
+    parser.add_argument('--model', type=str, default='CurveNet', metavar='N',
+                        help="Model to use, ['PointNet', 'PointNet++Msg','DGCNN', 'CurveNet']")
+    parser.add_argument('--dataset', type=str, default='Bosphorus',
+                        help='dataset : Bosphorus | Eurecom')
+    parser.add_argument('--feature_transform', type=str2bool, default=False,
+                        help='whether to use STN on features in PointNet')
+    parser.add_argument('--dropout', type=float, default=0.5, help='parameters in DGCNN: dropout rate')
+    parser.add_argument('--batch_size', type=int, default=1, metavar='BS',
+                        help='Size of batch')
+    parser.add_argument('--num_points', type=int, default=1024,
+                        help='num of points to use')
+    parser.add_argument('--emb_dims', type=int, default=1024, metavar='N',
+                        help='Dimension of embeddings in DGCNN')
+    parser.add_argument('--k', type=int, default=20, metavar='N',
+                        help='Num of nearest neighbors to use in DGCNN')
+    parser.add_argument('--adv_func', type=str, default='logits',
+                        choices=['logits', 'cross_entropy'],
+                        help='Adversarial loss function to use')
+    parser.add_argument('--kappa', type=float, default=30,
+                        help='min margin in logits adv loss')
+    parser.add_argument('--attack_lr', type=float, default=1e-2,
+                        help='lr in CW optimization')
+    parser.add_argument('--binary_step', type=int, default=1, metavar='N',
+                        help='Binary search step')
+    parser.add_argument('--num_iter', type=int, default=100, metavar='N',
+                        help='Number of iterations in each search step')
+    parser.add_argument('--num_of_class', default=105+1, type=int,
+                        help='number of class')
+    parser.add_argument('--budget', default=0.18,type=float,
+                        help='budget parameter in the clip function, use 0.18 | 0.45')
+    # ------------Dataset-----------------------
     parser.add_argument('--npoint', default=1024, type=int, help='')
-    #------------Attack-----------------------
+    parser.add_argument('--classes', default=105+1, type=int, help='')
+    # ------------Attack-----------------------
     parser.add_argument('--attack', default=None, type=str, help='GeoA3 | GeoA3_mesh')
     parser.add_argument('--attack_label', default='All', type=str, help='[All; ...; Untarget]')
     parser.add_argument('--binary_max_steps', type=int, default=10, help='')
     parser.add_argument('--initial_const', type=float, default=10, help='')
-    parser.add_argument('--iter_max_steps',  default=500, type=int, metavar='M', help='max steps')
+    parser.add_argument('--iter_max_steps', default=500, type=int, metavar='M', help='max steps')
     parser.add_argument('--optim', default='adam', type=str, help='adam| sgd')
     parser.add_argument('--lr', type=float, default=0.01, help='')
     parser.add_argument('--eval_num', type=int, default=1, help='')
@@ -430,7 +175,8 @@ if __name__ == '__main__':
     parser.add_argument('--is_partial_var', dest='is_partial_var', action='store_true', default=False, help='')
     parser.add_argument('--knn_range', type=int, default=3, help='')
     parser.add_argument('--is_subsample_opt', dest='is_subsample_opt', action='store_true', default=False, help='')
-    parser.add_argument('--is_use_lr_scheduler', dest='is_use_lr_scheduler', action='store_true', default=False, help='')
+    parser.add_argument('--is_use_lr_scheduler', dest='is_use_lr_scheduler', action='store_true', default=False,
+                        help='')
     ## perturbation clip setting
     parser.add_argument('--cc_linf', type=float, default=0.0, help='Coefficient for infinity norm')
     ## Proj offset
@@ -439,41 +185,112 @@ if __name__ == '__main__':
     ## Jitter
     parser.add_argument('--is_pre_jitter_input', action='store_true', default=False, help='')
     parser.add_argument('--is_previous_jitter_input', action='store_true', default=False, help='')
-    parser.add_argument('--calculate_project_jitter_noise_iter', default=50, type=int,help='')
+    parser.add_argument('--calculate_project_jitter_noise_iter', default=50, type=int, help='')
     parser.add_argument('--jitter_k', type=int, default=16, help='')
     parser.add_argument('--jitter_sigma', type=float, default=0.01, help='')
     parser.add_argument('--jitter_clip', type=float, default=0.05, help='')
     ## PGD-like attack
     parser.add_argument('--step_alpha', type=float, default=5, help='')
-    #------------Recording settings-------
+    # ------------Recording settings-------
     parser.add_argument('--is_record_converged_steps', action='store_true', default=False, help='')
     parser.add_argument('--is_record_loss', action='store_true', default=False, help='')
-    #------------OS-----------------------
-    parser.add_argument('-j', '--num_workers', default=8, type=int, metavar='N', help='number of data loading workers (default: 8)')
+    # ------------OS-----------------------
+    parser.add_argument('-j', '--num_workers', default=1, type=int, metavar='N',
+                        help='number of data loading workers (default: 8)')
     parser.add_argument('--is_save_normal', action='store_true', default=False, help='')
     parser.add_argument('--is_debug', action='store_true', default=False, help='')
     parser.add_argument('--is_low_memory', action='store_true', default=False, help='')
-    parser.add_argument(
-        '--batchSize', type=int, default=5, help='input batch size')
-    parser.add_argument(
-        '--workers', type=int, help='number of data loading workers', default=0)
-    parser.add_argument(
-        '--nepoch', type=int, default=150, help='number of epochs to train for')
-    parser.add_argument(
-        '--outf', type=str, default='cls', help='output folder')
-    parser.add_argument(
-        '--dropout', type=float, default=0.5, help='parameters in DGCNN: dropout rate')
-    parser.add_argument(
-        '--k', type=int, default=20, help='parameters in DGCNN: k')
-    parser.add_argument(
-        '--emb_dims', type=int, default=1024, metavar='N', help='parameters in DGCNN: Dimension of embeddings')
-    parser.add_argument(
-        '--model', type=str, default='PointNet', help='model type: PointNet or PointNet++ or DGCNN')
-    parser.add_argument(
-        '--dataset', type=str, default='Bosphorus', help="dataset: Bosphorus | Eurecom")
-    parser.add_argument(
-        '--feature_transform', action='store_true', help="use feature transform")
-    cfg  = parser.parse_args()
-    print(cfg, '\n')
 
-    main(cfg)
+    args = parser.parse_args()
+
+
+    if args.model == 'PointNet':
+        model = PointNetCls(k=args.num_of_class, feature_transform=args.feature_transform)
+    elif args.model == 'PointNet++Msg':
+        model = PointNet_Msg(args.num_of_class, normal_channel=False)
+    elif args.model == 'PointNet++Ssg':
+        model = PointNet_Ssg(args.num_of_class)
+    elif args.model == 'DGCNN':
+        model = DGCNN(args, output_channels=args.num_of_class).to(device)
+    elif args.model == 'CurveNet':
+        model = CurveNet(num_classes=args.num_of_class)
+    else:
+        exit('wrong model type')
+
+    model.load_state_dict(
+        torch.load(os.path.expanduser(
+            '~//yq_pointnet//cls//{}//{}_model_on_{}.pth'.format(args.dataset, args.model, args.dataset))))
+    model.eval()
+    model.to(device)
+
+
+    pt_model = PointNetCls(k=args.num_of_class, feature_transform=False)
+    pt_model.load_state_dict(
+        torch.load(os.path.expanduser(
+            '~//yq_pointnet//cls//{}//{}_model_on_{}.pth'.format(args.dataset, 'PointNet', args.dataset))))
+    pt_model.eval()
+    pt_model.to(device)
+
+    ptm_model = PointNet_Msg(args.num_of_class, normal_channel=False)
+    ptm_model.load_state_dict(
+        torch.load(os.path.expanduser(
+            '~//yq_pointnet//cls//{}//{}_model_on_{}.pth'.format(args.dataset, 'PointNet++Msg', args.dataset))))
+    ptm_model.eval()
+    ptm_model.to(device)
+
+    pts_model = PointNet_Ssg(args.num_of_class)
+    pts_model.load_state_dict(
+        torch.load(os.path.expanduser(
+            '~//yq_pointnet//cls//{}//{}_model_on_{}.pth'.format(args.dataset, 'PointNet++Ssg', args.dataset))))
+    pts_model.eval()
+    pts_model.to(device)
+
+    dgcnn_model = DGCNN(args, output_channels=args.num_of_class).to(device)
+    dgcnn_model.load_state_dict(
+        torch.load(os.path.expanduser(
+            '~//yq_pointnet//cls//{}//{}_model_on_{}.pth'.format(args.dataset, 'DGCNN', args.dataset))))
+    dgcnn_model.eval()
+    dgcnn_model.to(device)
+
+    cur_model = CurveNet(num_classes=args.num_of_class)
+    cur_model.load_state_dict(
+        torch.load(os.path.expanduser(
+            '~//yq_pointnet//cls//{}//{}_model_on_{}.pth'.format(args.dataset, 'CurveNet', args.dataset))))
+    cur_model.eval()
+    cur_model.to(device)
+
+
+
+    test_dataset_path = os.path.expanduser("~//yq_pointnet//BosphorusDB//eval.csv")
+    test_set = Bosphorus_Dataset(test_dataset_path)
+    test_loader = torch.utils.data.DataLoader(
+        test_set,
+        batch_size=1,
+        shuffle=True,
+        num_workers=0)
+
+
+    # if args.adv_func == 'logits':
+    #     adv_func = LogitsAdvLoss(kappa=args.kappa)
+    # else:
+    #     adv_func = CrossEntropyAdvLoss()
+
+    # if args.attack_method == 'untarget':
+    #     adv_func = UntargetedLogitsAdvLoss(kappa=args.kappa)
+
+
+    # dist_func = L2Dist()
+    # clip_func = ClipPointsLinf(budget=args.budget)
+
+
+
+    # run attack
+    attacked_data, real_label, target_label, success_num= attack()
+
+    # accumulate results
+    data_num = len(test_set)
+    success_rate = float(success_num) / float(data_num)
+    print("data num: ", data_num)
+
+
+

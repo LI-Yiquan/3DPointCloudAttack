@@ -6,10 +6,11 @@ import os
 import sys
 import time
 
-import ipdb
+# import ipdb
 import numpy as np
 import open3d as o3d
-from pytorch3d.ops import knn_points, knn_gather
+from attack.GeoA3.knn_utils import knn_points, knn_gather
+
 import scipy.io as sio
 import torch
 import torch.nn as nn
@@ -22,8 +23,10 @@ ROOT_DIR = BASE_DIR + '/../'
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(ROOT_DIR, 'Lib'))
 
-from utility import estimate_perpendicular, _compare, farthest_points_sample, pad_larger_tensor_with_index_batch
+from utility import estimate_perpendicular, _compare, farthest_points_sample, pad_larger_tensor_with_index_batch, estimate_normal
 from loss_utils import norm_l2_loss, chamfer_loss, pseudo_chamfer_loss, hausdorff_loss, curvature_loss, uniform_loss, _get_kappa_ori, _get_kappa_adv
+
+device = torch.device("cuda:6" if torch.cuda.is_available() else "cpu")
 
 def resample_reconstruct_from_pc(cfg, output_file_name, pc, normal=None, reconstruct_type='PRS'):
     assert pc.size() == 2
@@ -60,7 +63,7 @@ def offset_proj(offset, ori_pc, ori_normal, project='dir'):
     # offset: shape [b, 3, n], perturbation offset of each point
     # normal: shape [b, 3, n], normal vector of the object
 
-    condition_inner = torch.zeros(offset.shape).cuda().byte()
+    condition_inner = torch.zeros(offset.shape).to(device).byte()
 
     intra_KNN = knn_points(offset.permute(0,2,1), ori_pc.permute(0,2,1), K=1) #[dists:[b,n,1], idx:[b,n,1]]
     normal = knn_gather(ori_normal.permute(0,2,1), intra_KNN.idx).permute(0,3,1,2).squeeze(3).contiguous() # [b, 3, n]
@@ -100,10 +103,10 @@ def lp_clip(offset, cc_linf):
 def _forward_step(net, pc_ori, input_curr_iter, normal_ori, ori_kappa, target, scale_const, cfg, targeted):
     #needed cfg:[arch, classes, cls_loss_type, confidence, dis_loss_type, is_cd_single_side, dis_loss_weight, hd_loss_weight, curv_loss_weight, curv_loss_knn]
     b,_,n=input_curr_iter.size()
-    output_curr_iter = net(input_curr_iter)
+    output_curr_iter,_,_ = net(input_curr_iter)
 
     if cfg.cls_loss_type == 'Margin':
-        target_onehot = torch.zeros(target.size() + (cfg.classes,)).cuda()
+        target_onehot = torch.zeros(target.size() + (cfg.classes,)).to(device)
         target_onehot.scatter_(1, target.unsqueeze(1), 1.)
 
         fake = (target_onehot * output_curr_iter).sum(1)
@@ -118,11 +121,11 @@ def _forward_step(net, pc_ori, input_curr_iter, normal_ori, ori_kappa, target, s
 
     elif cfg.cls_loss_type == 'CE':
         if targeted:
-            cls_loss = nn.CrossEntropyLoss(reduction='none').cuda()(output_curr_iter, Variable(target, requires_grad=False))
+            cls_loss = nn.CrossEntropyLoss(reduction='none').to(device)(output_curr_iter, Variable(target.long(), requires_grad=False))
         else:
-            cls_loss = - nn.CrossEntropyLoss(reduction='none').cuda()(output_curr_iter, Variable(target, requires_grad=False))
+            cls_loss = - nn.CrossEntropyLoss(reduction='none').to(device)(output_curr_iter, Variable(target.long(), requires_grad=False))
     elif cfg.cls_loss_type == 'None':
-        cls_loss = torch.FloatTensor(b).zero_().cuda()
+        cls_loss = torch.FloatTensor(b).zero_().to(device)
     else:
         assert False, 'Not support such clssification loss'
 
@@ -162,7 +165,7 @@ def _forward_step(net, pc_ori, input_curr_iter, normal_ori, ori_kappa, target, s
         constrain_loss = constrain_loss + cfg.curv_loss_weight * curv_loss
         info = info+'curv_loss : {0:6.4f}\t'.format(curv_loss.mean().item())
     else:
-        normal_curr_iter = torch.zeros(b, 3, n).cuda()
+        normal_curr_iter = torch.zeros(b, 3, n).to(device)
         curv_loss = 0
 
     # uniform loss
@@ -173,45 +176,62 @@ def _forward_step(net, pc_ori, input_curr_iter, normal_ori, ori_kappa, target, s
     else:
         uniform = 0
 
-    scale_const = scale_const.float().cuda()
+    scale_const = scale_const.float().to(device)
     loss_n = cls_loss + scale_const * constrain_loss
     loss = loss_n.mean()
 
     return output_curr_iter, normal_curr_iter, loss, loss_n, cls_loss, dis_loss, hd_loss, curv_loss, constrain_loss, info
 
-def attack(net, input_data, cfg, i, loader_len, saved_dir=None):
+def geoA3_attack(net,pt_model,ptm_model,pts_model,dgcnn_model,cur_model, pc, label, cfg, i, loader_len, saved_dir=None):
     #needed cfg:[arch, classes, attack_label, initial_const, lr, optim, binary_max_steps, iter_max_steps, metric,
     #  cls_loss_type, confidence, dis_loss_type, is_cd_single_side, dis_loss_weight, hd_loss_weight, curv_loss_weight, curv_loss_knn,
     #  is_pre_jitter_input, calculate_project_jitter_noise_iter, jitter_k, jitter_sigma, jitter_clip,
     #  is_save_normal,
     #  ]
 
-    if cfg.attack_label == 'Untarget':
+    pt_model = pt_model.to(device)
+    pt_model.eval()
+
+    ptm_model = ptm_model.to(device)
+    ptm_model.eval()
+
+    pts_model = pts_model.to(device)
+    pts_model.eval()
+
+    dgcnn_model = dgcnn_model.to(device)
+    dgcnn_model.eval()
+
+    cur_model = cur_model.to(device)
+    cur_model.eval()
+
+    pt_fail = 0
+    ptm_fail = 0
+    pts_fail = 0
+    dgcnn_fail = 0
+    cur_fail = 0
+
+    if cfg.attack_method == 'untarget':
         targeted = False
     else:
         targeted = True
 
     step_print_freq = 50
 
-    pc = input_data[0]
-    normal = input_data[1]
-    gt_labels = input_data[2]
-    if pc.size(3) == 3:
-        pc = pc.permute(0,1,3,2)
-    if normal.size(3) == 3:
-        normal = normal.permute(0,1,3,2)
+    pc = pc.transpose(2,1)
+    normal = estimate_normal(pc, k=3)
 
-    bs, l, _, n = pc.size()
-    b = bs*l
+    gt_labels = label
+    b ,_, n = pc.size()
 
-    pc_ori = pc.view(b, 3, n).cuda()
-    normal_ori = normal.view(b, 3, n).cuda()
+
+    pc_ori = pc.view(b, 3, n).to(device)
+    normal_ori = normal.view(b, 3, n).to(device)
     gt_target = gt_labels.view(-1)
 
-    if cfg.attack_label == 'Untarget':
-        target = gt_target.cuda()
+    if cfg.attack_method == 'untarget':
+        target = gt_target.to(device)
     else:
-        target = input_data[3].view(-1).cuda()
+        target = gt_target.to(device)
 
     if cfg.curv_loss_weight !=0:
         kappa_ori = _get_kappa_ori(pc_ori, normal_ori, cfg.curv_loss_knn)
@@ -223,7 +243,7 @@ def attack(net, input_data, cfg, i, loader_len, saved_dir=None):
     upper_bound = torch.ones(b) * 1e10
 
     best_loss = [1e10] * b
-    best_attack = torch.ones(b, 3, n).cuda()
+    best_attack = torch.ones(b, 3, n).to(device)
     best_attack_step = [-1] * b
     best_attack_BS_idx = [-1] * b
     all_loss_list = [[-1] * b] * cfg.iter_max_steps
@@ -231,7 +251,7 @@ def attack(net, input_data, cfg, i, loader_len, saved_dir=None):
         iter_best_loss = [1e10] * b
         iter_best_score = [-1] * b
         constrain_loss = torch.ones(b) * 1e10
-        attack_success = torch.zeros(b).cuda()
+        attack_success = torch.zeros(b).to(device)
 
         input_all = None
 
@@ -243,7 +263,7 @@ def attack(net, input_data, cfg, i, loader_len, saved_dir=None):
                         init_point_idx = np.random.randint(n)
 
                         intra_KNN = knn_points(pc_ori[:, :, init_point_idx].unsqueeze(2).permute(0,2,1), pc_ori.permute(0,2,1), K=cfg.knn_range+1) #[dists:[b,n,cfg.knn_range+1], idx:[b,n,cfg.knn_range+1]]
-                    part_offset = torch.zeros(b, 3, cfg.knn_range).cuda()
+                    part_offset = torch.zeros(b, 3, cfg.knn_range).to(device)
                     nn.init.normal_(part_offset, mean=0, std=1e-3)
                     part_offset.requires_grad_()
 
@@ -262,7 +282,7 @@ def attack(net, input_data, cfg, i, loader_len, saved_dir=None):
                         periodical_pc = pc_ori.clone()
             else:
                 if step == 0:
-                    offset = torch.zeros(b, 3, n).cuda()
+                    offset = torch.zeros(b, 3, n).to(device)
                     nn.init.normal_(offset, mean=0, std=1e-3)
                     offset.requires_grad_()
 
@@ -290,13 +310,13 @@ def attack(net, input_data, cfg, i, loader_len, saved_dir=None):
                     if input_curr_iter.size(2) < input_all.size(2):
                         #batch_k_pc = torch.cat([input_curr_iter[k].unsqueeze(0)]*cfg.eval_num)
                         batch_k_pc = farthest_points_sample(torch.cat([input_all[k].unsqueeze(0)]*cfg.eval_num), cfg.npoint)
-                        batch_k_adv_output = net(batch_k_pc)
+                        batch_k_adv_output,_,_ = net(batch_k_pc)
                         attack_success[k] = _compare(torch.max(batch_k_adv_output,1)[1].data, target[k], gt_target[k], targeted).sum() > 0.5 * cfg.eval_num
                         output_label = torch.max(batch_k_adv_output,1)[1].mode().values.item()
                     else:
-                        adv_output = net(input_curr_iter[k].unsqueeze(0))
+                        adv_output,_,_ = net(input_curr_iter[k].unsqueeze(0))
                         output_label = torch.argmax(adv_output).item()
-                        attack_success[k] = _compare(output_label, target[k], gt_target[k].cuda(), targeted).item()
+                        attack_success[k] = _compare(output_label, target[k], gt_target[k].to(device), targeted).item()
 
                     metric = constrain_loss[k].item()
 
@@ -360,19 +380,19 @@ def attack(net, input_data, cfg, i, loader_len, saved_dir=None):
                 fout.close()
 
             if cfg.is_debug:
-                info = '[{5}/{6}][{0}/{1}][{2}/{3}] \t loss: {4:6.4f}\t output:{7}\t'.format(search_step+1, cfg.binary_max_steps, step+1, cfg.iter_max_steps, loss.item(), i, loader_len, output_label) + info
+                info = '[{5}/{6}][{0}/{1}][{2}/{3}] \t loss: {4:6.4f}\t output:{7}\t'.format(search_step+1, cfg.binary_step, step+1, cfg.num_iter, loss.item(), i, loader_len, output_label) + info
             else:
-                info = '[{5}/{6}][{0}/{1}][{2}/{3}] \t loss: {4:6.4f}\t'.format(search_step+1, cfg.binary_max_steps, step+1, cfg.iter_max_steps, loss.item(), i, loader_len) + info
+                info = '[{5}/{6}][{0}/{1}][{2}/{3}] \t loss: {4:6.4f}\t'.format(search_step+1, cfg.binary_step, step+1, cfg.num_iter, loss.item(), i, loader_len) + info
 
-            if step % step_print_freq == 0 or step == cfg.iter_max_steps - 1:
+            if step % step_print_freq == 0 or step == cfg.num_iter - 1:
                 print(info)
 
-        if cfg.is_debug:
-            ipdb.set_trace()
+        # if cfg.is_debug:
+        #     ipdb.set_trace()
 
         # adjust the scale constants
         for k in range(b):
-            if _compare(output_label, target[k], gt_target[k].cuda(), targeted).item() and iter_best_score[k] != -1:
+            if _compare(output_label, target[k], gt_target[k].to(device), targeted).item() and iter_best_score[k] != -1:
                 lower_bound[k] = max(lower_bound[k], scale_const[k])
                 if upper_bound[k] < 1e9:
                     scale_const[k] = (lower_bound[k] + upper_bound[k]) * 0.5
@@ -382,5 +402,72 @@ def attack(net, input_data, cfg, i, loader_len, saved_dir=None):
                 upper_bound[k] = min(upper_bound[k], scale_const[k])
                 if upper_bound[k] < 1e9:
                     scale_const[k] = (lower_bound[k] + upper_bound[k]) * 0.5
+
+    print('ori label as: ', target.item())
+    # Test transfer attack
+    transfer_result = best_attack.transpose(2,1)
+    transfer_result = transfer_result.float().to(device)
+    transfer_logits, _, _ = pt_model(transfer_result)
+    print('pointnet result: ', torch.argmax(transfer_logits, dim=1).item())
+    if cfg.attack_method == 'untarget':
+        if torch.argmax(transfer_logits, dim=1) == target:
+            pt_fail += 1
+            print("pointnet fail: ", pt_fail)
+    else:
+        if torch.argmax(transfer_logits, dim=1) != target:
+            pt_fail += 1
+            print("pointnet fail: ", pt_fail)
+
+    transfer_result = best_attack.transpose(2,1)
+    transfer_result = transfer_result.float().to(device)
+    transfer_logits, _, _ = ptm_model(transfer_result)
+    print('pointnet++msg result: ', torch.argmax(transfer_logits, dim=1).item())
+    if cfg.attack_method == 'untarget':
+        if torch.argmax(transfer_logits, dim=1) == target:
+            ptm_fail += 1
+            print("pointnet++msg fail: ", ptm_fail)
+    else:
+        if torch.argmax(transfer_logits, dim=1) != target:
+            ptm_fail += 1
+            print("pointnet++msg fail: ", ptm_fail)
+
+    transfer_result = best_attack.transpose(2,1)
+    transfer_result = transfer_result.float().to(device)
+    transfer_logits, _, _ = pts_model(transfer_result)
+    print('pointnet++ssg result: ', torch.argmax(transfer_logits, dim=1).item())
+    if cfg.attack_method == 'untarget':
+        if torch.argmax(transfer_logits, dim=1) == target:
+            pts_fail += 1
+            print("pointnet++ssg fail: ", pts_fail)
+    else:
+        if torch.argmax(transfer_logits, dim=1) != target:
+            pts_fail += 1
+            print("pointnet++ssg fail: ", pts_fail)
+
+    transfer_result = best_attack.transpose(2,1)
+    transfer_result = transfer_result.float().to(device)
+    transfer_logits, _, _ = dgcnn_model(transfer_result)
+    print('dgcnn result: ', torch.argmax(transfer_logits, dim=1).item())
+    if cfg.attack_method == 'untarget':
+        if torch.argmax(transfer_logits, dim=1) == target:
+            dgcnn_fail += 1
+            print("dgcnn fail: ", dgcnn_fail)
+    else:
+        if torch.argmax(transfer_logits, dim=1) != target:
+            dgcnn_fail += 1
+            print("dgcnn fail: ", dgcnn_fail)
+
+    transfer_result = best_attack.transpose(2,1)
+    transfer_result = transfer_result.float().to(device)
+    transfer_logits, _, _ = cur_model(transfer_result)
+    print('curvenet result: ', torch.argmax(transfer_logits, dim=1).item())
+    if cfg.attack_method == 'untarget':
+        if torch.argmax(transfer_logits, dim=1) == target:
+            cur_fail += 1
+            print("curvenet fail: ", cur_fail)
+    else:
+        if torch.argmax(transfer_logits, dim=1) != target:
+            cur_fail += 1
+            print("curvenet fail: ", cur_fail)
 
     return best_attack, target, (np.array(best_loss)<1e10), best_attack_step, all_loss_list  #best_attack:[b, 3, n], target: [b], best_loss:[b], best_attack_step:[b], all_loss_list:[iter_max_steps, b]
